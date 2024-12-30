@@ -52,7 +52,7 @@ IPAddress subnet(255,255,255,0);
  * Default WiFi connection information.
  *
  */
-const char* ap_default_psk = "12345678"; ///< Default PSK.
+const char* ap_default_psk = "12345678";   // Default PSK.
 
 #if defined(USE_DNS_SERVER)
 #include <DNSServer.h>
@@ -273,7 +273,6 @@ void WiFi_setup()
   }
 
   bool try_external = false;
-  bool use_chipid = true;
 
   if (settings->ssid[0] != '\0') {
 
@@ -282,12 +281,12 @@ void WiFi_setup()
         station_psk  = settings->psk;
         try_external = true;
     } else {
-        // no password                   // flags as not an external network
-        use_chipid = false;              // use settings->ssid as a custom SSID for AP mode
+        // no password - use settings->ssid as a custom SSID for AP mode
+        strcpy(settings->myssid, settings->ssid);
     }
 
     // ... Compare file config with sdk config.
-    if (WiFi.SSID() != station_ssid || WiFi.psk() != station_psk)
+    if (try_external && (WiFi.SSID() != station_ssid || WiFi.psk() != station_psk))
     {
       //Serial.println(F("WiFi config changed."));
       // ... Try to connect to WiFi station.
@@ -307,15 +306,13 @@ void WiFi_setup()
   }
 
   // Set Hostname.
-  if (use_chipid) {
+  if (settings->myssid[0] != '\0') {
+      host_name = settings->myssid;
+  } else {
       host_name += "-";
       char chipID[8];
       snprintf(chipID, 8, "%06x", (SoC->getChipId() & 0xFFFFFF));
       host_name += chipID;           // SoftRF-xxxxxx
-  } else {
-      //host_name += "-";
-      //host_name += settings->ssid;
-      host_name = settings->ssid;    // fully personalized
   }
   SoC->WiFi_hostname(host_name);
 
@@ -362,8 +359,11 @@ void WiFi_setup()
       F("Ready") : F("Failed!"));
 
     Serial.print(F("Setting soft-AP ... "));
+    Serial.print(host_name);
+    Serial.print(" ");
+    Serial.print(ap_default_psk);
     Serial.println(WiFi.softAP(host_name.c_str(), ap_default_psk) ?
-      F("Ready") : F("Failed!"));
+      F(" - Ready") : F(" - Failed!"));
 #if defined(USE_DNS_SERVER)
     // if DNSServer is started with "*" for domain name, it will reply with
     // provided IP to all DNS request

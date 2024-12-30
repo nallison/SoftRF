@@ -56,12 +56,13 @@ static int view_state_prev = STATE_TVIEW_NONE;
 static void EPD_Draw_Text()
 {
   static int prev_j=0;
+  int i;
   int j=0;
   int bearing;
   char info_line [TEXT_VIEW_LINE_LENGTH];
   char id_text   [TEXT_VIEW_LINE_LENGTH];
 
-  for (int i=0; i < MAX_TRACKING_OBJECTS; i++) {
+  for (i=0; i < MAX_TRACKING_OBJECTS; i++) {
     if (Container[i].addr && (now() - Container[i].timestamp) <= EPD_EXPIRATION_TIME) {
 
       traffic_by_dist[j].fop = &Container[i];
@@ -91,20 +92,20 @@ static void EPD_Draw_Text()
       }
     }
     prev_j = j;
+    i = EPD_current - 1;
 
-    bearing = (int) traffic_by_dist[EPD_current - 1].fop->bearing;
+    bearing = (int) traffic_by_dist[i].fop->bearing;
 
     /* This bearing is always relative to current ground track */
 //  if (ui->orientation == DIRECTION_TRACK_UP) {
       bearing -= ThisAircraft.course;
 //  }
 
-    if (bearing < 0) {
+    if (bearing < 0)
       bearing += 360;
-    }
 
     int oclock = ((bearing + 15) % 360) / 30;
-    float RelativeVertical = traffic_by_dist[EPD_current - 1].fop->altitude -
+    float RelativeVertical = traffic_by_dist[i].fop->altitude -
                                 ThisAircraft.altitude;
 
     switch (ui->units)
@@ -113,36 +114,36 @@ static void EPD_Draw_Text()
       u_dist = "nm";
       u_alt  = "f";
       u_spd  = "kts";
-      disp_dist = (traffic_by_dist[EPD_current - 1].distance * _GPS_MILES_PER_METER) /
+      disp_dist = (traffic_by_dist[i].distance * _GPS_MILES_PER_METER) /
                   _GPS_MPH_PER_KNOT;
       disp_alt  = abs((int) (RelativeVertical * _GPS_FEET_PER_METER));
-      disp_spd  = traffic_by_dist[EPD_current - 1].fop->speed;
+      disp_spd  = traffic_by_dist[i].fop->speed;
       break;
     case UNITS_MIXED:
       u_dist = "km";
       u_alt  = "f";
       u_spd  = "kph";
-      disp_dist = traffic_by_dist[EPD_current - 1].distance / 1000.0;
+      disp_dist = traffic_by_dist[i].distance / 1000.0;
       disp_alt  = abs((int) (RelativeVertical * _GPS_FEET_PER_METER));
-      disp_spd  = traffic_by_dist[EPD_current - 1].fop->speed * _GPS_KMPH_PER_KNOT;
+      disp_spd  = traffic_by_dist[i].fop->speed * _GPS_KMPH_PER_KNOT;
       break;
     case UNITS_METRIC:
     default:
       u_dist = "km";
       u_alt  = "m";
       u_spd  = "kph";
-      disp_dist = traffic_by_dist[EPD_current - 1].distance / 1000.0;
+      disp_dist = traffic_by_dist[i].distance / 1000.0;
       disp_alt  = abs((int) RelativeVertical);
-      disp_spd  = traffic_by_dist[EPD_current - 1].fop->speed * _GPS_KMPH_PER_KNOT;
+      disp_spd  = traffic_by_dist[i].fop->speed * _GPS_KMPH_PER_KNOT;
       break;
     }
 
     if (ui->idpref == ID_TYPE) {
-      uint8_t acft_type = traffic_by_dist[EPD_current - 1].fop->aircraft_type;
+      uint8_t acft_type = traffic_by_dist[i].fop->aircraft_type;
       acft_type = acft_type > AIRCRAFT_TYPE_STATIC ? AIRCRAFT_TYPE_UNKNOWN : acft_type;
       strncpy(id_text, Aircraft_Type[acft_type], sizeof(id_text));
     } else {
-      uint32_t id = traffic_by_dist[EPD_current - 1].fop->addr;
+      uint32_t id = traffic_by_dist[i].fop->addr;
 
       if (!(SoC->ADB_ops && SoC->ADB_ops->query(DB_OGN, id, id_text, sizeof(id_text)))) {
         snprintf(id_text, sizeof(id_text), "ID: %06X", id);
@@ -162,7 +163,9 @@ static void EPD_Draw_Text()
 
 //      Serial.println();
 
-      snprintf(info_line, sizeof(info_line), "Traffic %d/%d", EPD_current, j);
+      //snprintf(info_line, sizeof(info_line), "Traffic %d/%d", EPD_current, j);
+      snprintf(info_line, sizeof(info_line), "%d/%d RSSI %d",
+          EPD_current, j, traffic_by_dist[i].fop->rssi);
       display->getTextBounds(info_line, 0, 0, &tbx, &tby, &tbw, &tbh);
       y += tbh;
       display->setCursor(x, y);
@@ -212,7 +215,7 @@ static void EPD_Draw_Text()
       y += TEXT_VIEW_LINE_SPACING;
 
       snprintf(info_line, sizeof(info_line), "CoG %3d deg",
-               (int) traffic_by_dist[EPD_current - 1].fop->course);
+               (int) traffic_by_dist[i].fop->course);
       display->getTextBounds(info_line, 0, 0, &tbx, &tby, &tbw, &tbh);
       y += tbh;
       display->setCursor(x, y);

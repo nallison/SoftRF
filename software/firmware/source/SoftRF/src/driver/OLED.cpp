@@ -27,6 +27,7 @@
 #include "EEPROM.h"
 #include "RF.h"
 #include "../protocol/data/GNS5892.h"
+#include "../protocol/data/NMEA.h"
 #include "LED.h"
 #include "GNSS.h"
 #include "Baro.h"
@@ -78,6 +79,7 @@ static bool OLED_display_titles = false;
 static uint32_t prev_tx_packets_counter = (uint32_t) -1;
 static uint32_t prev_rx_packets_counter = (uint32_t) -1;
 static uint32_t prev_adsb_packets_counter = (uint32_t) -1;
+static bool prev_rx1090found = false;
 // extern uint32_t tx_packets_counter, rx_packets_counter, adsb_packets_counter;
 
 static uint32_t prev_acrfts_counter = (uint32_t) -1;
@@ -88,6 +90,7 @@ static char     prev_fix            = ' ';
 static int8_t   prev_band           = -1;
 static int8_t   prev_type           = -1;
 static int8_t   prev_min            = -1;
+static int8_t   prev_maxrssi        = 0;
 
 #if !defined(EXCLUDE_OLED_BARO_PAGE)
 static int32_t  prev_altitude       = (int32_t)   -10000;
@@ -240,8 +243,8 @@ static void OLED_settings()
     if (prev_band >= 0 && prev_band < 11)
       u8x8->draw2x2String(0, 6, ISO3166_CC[prev_band]);
   }
-  if (prev_type != settings->aircraft_type) {
-    prev_type = settings->aircraft_type;
+  if (prev_type != settings->acft_type) {
+    prev_type = settings->acft_type;
     if (prev_type >= 0 && prev_type < 17)
       u8x8->draw2x2String(5, 6, aircraft_type_lbl[prev_type]);
   }
@@ -271,7 +274,6 @@ static void OLED_radio()
 {
   char buf[16];
   uint32_t disp_value;
-  bool show_adsb = false;
 
   if (!OLED_display_titles) {
 
@@ -287,11 +289,9 @@ static void OLED_radio()
     if (settings->rx1090) {
         u8x8->drawString(8, 4, RX_text);
         u8x8->drawString(7, 6, "ADS");
-        show_adsb = true;
     } else if (settings->gdl90_in != DEST_NONE) {
         u8x8->drawString(8, 4, RX_text);
         u8x8->drawString(7, 6, "GDL");
-        show_adsb = true;
     } else {
         //u8x8->drawString(10, 4, RX_text);
         u8x8->drawString(8, 4, RX_text);
@@ -353,6 +353,10 @@ static void OLED_radio()
     prev_fix = fix;
   }
 
+  bool show_adsb = false;
+  if (settings->rx1090 != ADSB_RX_NONE || settings->gdl90_in != DEST_NONE)
+      show_adsb = true;
+
   if (rx_packets_counter != prev_rx_packets_counter) {
     disp_value = rx_packets_counter % 1000;
     itoa(disp_value, buf, 10);
@@ -366,32 +370,40 @@ static void OLED_radio()
     //u8x8->draw2x2String(10, ((settings->rx1090 || (settings->gdl90_in != DEST_NONE))? 4 : 5), buf);
     u8x8->draw2x2String(10, 4, buf);
     if (! show_adsb) {                     // then show max RSSI instead
-      if (maxrssi < 0) {
-        disp_value = maxrssi;
-        if (disp_value < -99)
-            disp_value = -99;
-        itoa(disp_value, buf, 10);
-        if (disp_value > -10)
-            strcat_P(buf,PSTR(" "));
-        u8x8->draw2x2String(10, 6, buf);
-      } else {
-        u8x8->draw2x2String(10, 6, "---");
+      if (maxrssi != prev_maxrssi) {
+        if (maxrssi < 0) {
+          disp_value = maxrssi;
+          if (disp_value < -99)
+              disp_value = -99;
+          itoa(disp_value, buf, 10);
+          if (disp_value > -10)
+              strcat_P(buf,PSTR(" "));
+          u8x8->draw2x2String(10, 6, buf);
+        } else {
+          u8x8->draw2x2String(10, 6, "---");
+        }
+        prev_maxrssi = maxrssi;
       }
     }
     prev_rx_packets_counter = rx_packets_counter;
   }
 
   if (show_adsb) {
-    if (adsb_packets_counter != prev_adsb_packets_counter) {
-      disp_value = adsb_packets_counter % 1000;
-      itoa(disp_value, buf, 10);
-      if (disp_value < 10) {
-          strcat_P(buf,PSTR("  "));
-      } else if (disp_value < 100) {
-          strcat_P(buf,PSTR(" "));
+    if (adsb_packets_counter != prev_adsb_packets_counter || prev_rx1090found != rx1090found) {
+      if (rx1090found) {
+          disp_value = adsb_packets_counter % 1000;
+          itoa(disp_value, buf, 10);
+          if (disp_value < 10) {
+              strcat_P(buf,PSTR("  "));
+          } else if (disp_value < 100) {
+              strcat_P(buf,PSTR(" "));
+          }
+          u8x8->draw2x2String(10, 6, buf);
+      } else {
+          u8x8->draw2x2String(10, 6, "---");
       }
-      u8x8->draw2x2String(10, 6, buf);
       prev_adsb_packets_counter = adsb_packets_counter;
+      prev_rx1090found = rx1090found;
     }
   }
 

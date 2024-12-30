@@ -457,7 +457,7 @@ struct rst_info {
 
 #define EXCLUDE_CC13XX
 //#define EXCLUDE_SOFTRF_HEARTBEAT
-#define EXCLUDE_LK8EX1
+//#define EXCLUDE_LK8EX1
 //#define EXCLUDE_IMU
 
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32S3)

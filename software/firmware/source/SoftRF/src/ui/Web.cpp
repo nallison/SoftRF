@@ -186,9 +186,6 @@ Copyright (C) 2015-2021 &nbsp;&nbsp;&nbsp; Linar Yusupov\
 #if defined(USE_EGM96)
 static const char egm96_upload_html[] PROGMEM =
 "<html>\
- <head>\
- <meta http-equiv='Content-Type' content='text/html; charset=utf-8'>\
- </head>\
  <p>Select and upload egm96s.dem</p>\
  <form method='POST' action='/doegmupld' enctype='multipart/form-data'>\
  <input type='file' name='name'><input type='submit' value='Upload' title='Upload'>\
@@ -197,11 +194,15 @@ static const char egm96_upload_html[] PROGMEM =
 #endif
 
 #if defined(ESP32)
+static const char settings_upload_html[] PROGMEM =
+"<html>\
+ <p>Select and upload settings.txt</p>\
+ <form method='POST' action='/dostgupld' enctype='multipart/form-data'>\
+ <input type='file' name='name'><input type='submit' value='Upload' title='Upload'>\
+ </form>\
+ </html>";
 static const char wav_upload_html[] PROGMEM =
 "<html>\
- <head>\
- <meta http-equiv='Content-Type' content='text/html; charset=utf-8'>\
- </head>\
  <p>Select and upload waves.tar (read instructions first)</p>\
  <form method='POST' action='/dowavupld' enctype='multipart/form-data'>\
  <input type='file' name='name'><input type='submit' value='Upload' title='Upload'>\
@@ -211,9 +212,6 @@ static const char wav_upload_html[] PROGMEM =
 
 static const char log_upload_html[] PROGMEM =
 "<html>\
- <head>\
- <meta http-equiv='Content-Type' content='text/html; charset=utf-8'>\
- </head>\
  <p>Select and upload a file into SD/logs</p>\
  <form method='POST' action='/dologupld' enctype='multipart/form-data'>\
  <input type='file' name='name'><input type='submit' value='Upload' title='Upload'>\
@@ -328,6 +326,78 @@ void alarmlogfile(){
     }
 }
 
+void settingsdownload(){
+    if (! SPIFFS.exists("/settings.txt")) {
+        server.send(404, textplain, "settings file does not exist");
+        return;
+    }
+    File file = SPIFFS.open("/settings.txt", FILE_READ);
+    if (file) {
+      server.sendHeader("Content-Type", "text/text");
+      server.sendHeader("Content-Disposition", "attachment; filename=settings.txt");
+      server.sendHeader("Connection", "close");
+      server.streamFile(file, "application/octet-stream");
+      file.close();
+    }
+}
+void settingsupload(){
+    anyUpload(false);   // into SPIFFS
+}
+
+void settingsbackup(){
+    if (! SPIFFS.exists("/settings.txt"))
+        save_settings_to_file();
+    SPIFFS.rename("/settings.txt","/settingb.txt");
+    server.send(200, textplain, "Copied settings.txt to settingb.txt");
+}
+
+void settingsreboot(){
+
+    server.send_P(200,
+      PSTR("text/html"),
+      PSTR("<html>\
+<head>\
+<meta http-equiv='refresh' content='30; url=/'>\
+<meta name='viewport' content='width=device-width, initial-scale=1'>\
+<title>Restarting...</title>\
+</head>\
+<body>\
+  <p align=center><h3 align=center>Settings applied.</h3></p>\
+  <p align=center><h3 align=center>Restart is in progress, please wait...</h3></p>\
+</body>\
+</html>"));
+
+  //Serial.println(F("New settings:"));
+  //show_settings_serial();
+  save_settings_to_file();   // this also shows the new settings
+
+  SoC->WDT_fini();
+  if (SoC->Bluetooth_ops) { SoC->Bluetooth_ops->fini(); }
+  //EEPROM_store();
+  delay(2000);
+  reboot();
+}
+
+void settingsswap(){
+    if (! SPIFFS.exists("/settingb.txt")) {
+        server.send(500, textplain, "settingb.txt backup file does not exist");
+        return;
+    }
+    SPIFFS.rename("/settingb.txt","/settingt.txt");
+    SPIFFS.rename("/settings.txt","/settingb.txt");  // can fail if settings.txt does not exist
+    SPIFFS.rename("/settingt.txt","/settings.txt");
+    load_settings_from_file();
+    if (SPIFFS.exists("/settings.txt")) {  // load_settings_from_file() did not fail
+        server.send(200, textplain, "swapped settings.txt & settingb.txt, rebooting...");
+    } else {
+        SPIFFS.remove("/settings.txt");   // former settingb.txt
+        SPIFFS.rename("/settingb.txt","/settings.txt");
+        server.send(500, textplain, "invalid settingb.txt, restored settings.txt, reboot in 10 sec");
+        delay(10000);
+    }
+    settingsreboot();
+}
+
 #if defined(USE_SD_CARD)
 void flightlogfile(){
     closeSDlog();
@@ -437,9 +507,10 @@ void handleSettings() {
 </td>\
 </tr>"),
   ((settings->debug_flags & DEBUG_SIMULATE)? "Warning: simulation mode" :
-  (default_settings_used? "Warning: reverted to default settings" :
+  (default_settings_used==STG_DEFAULT? "Warning: reverted to default settings" :
   (BTpaused ? "Bluetooth paused, reboot to resume" :
-    "Restored user settings on boot"))),
+  (default_settings_used==STG_EEPROM? "Warning: reverted to EEPROM settings" :
+    "Restored user settings on boot")))),
   (settings->mode == SOFTRF_MODE_NORMAL ? "selected" : "") , SOFTRF_MODE_NORMAL,
   (settings->mode == SOFTRF_MODE_MORENMEA ? "selected" : "") , SOFTRF_MODE_MORENMEA,
   (settings->mode == SOFTRF_MODE_GPSBRIDGE ? "selected" : ""), SOFTRF_MODE_GPSBRIDGE,
@@ -681,16 +752,16 @@ void handleSettings() {
   (settings->band == RF_BAND_KR ? "selected" : ""), RF_BAND_KR,
   (settings->band == RF_BAND_IL ? "selected" : ""), RF_BAND_IL,
   (settings->band == RF_BAND_UK ? "selected" : ""), RF_BAND_UK,
-  (settings->aircraft_type == AIRCRAFT_TYPE_GLIDER ? "selected" : ""),  AIRCRAFT_TYPE_GLIDER,
-  (settings->aircraft_type == AIRCRAFT_TYPE_TOWPLANE ? "selected" : ""),  AIRCRAFT_TYPE_TOWPLANE,
-  (settings->aircraft_type == AIRCRAFT_TYPE_POWERED ? "selected" : ""),  AIRCRAFT_TYPE_POWERED,
-  (settings->aircraft_type == AIRCRAFT_TYPE_HELICOPTER ? "selected" : ""),  AIRCRAFT_TYPE_HELICOPTER,
-  (settings->aircraft_type == AIRCRAFT_TYPE_UAV ? "selected" : ""),  AIRCRAFT_TYPE_UAV,
-  (settings->aircraft_type == AIRCRAFT_TYPE_HANGGLIDER ? "selected" : ""),  AIRCRAFT_TYPE_HANGGLIDER,
-  (settings->aircraft_type == AIRCRAFT_TYPE_PARAGLIDER ? "selected" : ""),  AIRCRAFT_TYPE_PARAGLIDER,
-  (settings->aircraft_type == AIRCRAFT_TYPE_BALLOON ? "selected" : ""),  AIRCRAFT_TYPE_BALLOON,
-  (settings->aircraft_type == AIRCRAFT_TYPE_STATIC ? "selected" : ""),  AIRCRAFT_TYPE_STATIC,
-  (settings->aircraft_type == AIRCRAFT_TYPE_WINCH ? "selected" : ""),  AIRCRAFT_TYPE_WINCH,
+  (settings->acft_type == AIRCRAFT_TYPE_GLIDER ? "selected" : ""),  AIRCRAFT_TYPE_GLIDER,
+  (settings->acft_type == AIRCRAFT_TYPE_TOWPLANE ? "selected" : ""),  AIRCRAFT_TYPE_TOWPLANE,
+  (settings->acft_type == AIRCRAFT_TYPE_POWERED ? "selected" : ""),  AIRCRAFT_TYPE_POWERED,
+  (settings->acft_type == AIRCRAFT_TYPE_HELICOPTER ? "selected" : ""),  AIRCRAFT_TYPE_HELICOPTER,
+  (settings->acft_type == AIRCRAFT_TYPE_UAV ? "selected" : ""),  AIRCRAFT_TYPE_UAV,
+  (settings->acft_type == AIRCRAFT_TYPE_HANGGLIDER ? "selected" : ""),  AIRCRAFT_TYPE_HANGGLIDER,
+  (settings->acft_type == AIRCRAFT_TYPE_PARAGLIDER ? "selected" : ""),  AIRCRAFT_TYPE_PARAGLIDER,
+  (settings->acft_type == AIRCRAFT_TYPE_BALLOON ? "selected" : ""),  AIRCRAFT_TYPE_BALLOON,
+  (settings->acft_type == AIRCRAFT_TYPE_STATIC ? "selected" : ""),  AIRCRAFT_TYPE_STATIC,
+  (settings->acft_type == AIRCRAFT_TYPE_WINCH ? "selected" : ""),  AIRCRAFT_TYPE_WINCH,
   (settings->alarm == TRAFFIC_ALARM_NONE ? "selected" : ""),  TRAFFIC_ALARM_NONE,
   (settings->alarm == TRAFFIC_ALARM_DISTANCE ? "selected" : ""),  TRAFFIC_ALARM_DISTANCE,
   (settings->alarm == TRAFFIC_ALARM_VECTOR ? "selected" : ""),  TRAFFIC_ALARM_VECTOR,
@@ -807,7 +878,7 @@ void handleSettings() {
 <INPUT type='text' name='ssid' maxlength='18' value='%s' size='16' ></td>\
 </tr>\
 <tr>\
-<th align=left>&nbsp;&nbsp;&nbsp;&nbsp;PSK (blank for custom):</th>\
+<th align=left>&nbsp;&nbsp;&nbsp;&nbsp;PSK (blank for custom SSID):</th>\
 <td align=right>\
 <INPUT type='password' name='psk' maxlength='16' value='%s' size='16' ></td>\
 </tr>\
@@ -1265,8 +1336,8 @@ void handleSettings() {
 <tr>\
 <th align=left>Shutdown if no external power</th>\
 <td align=right>\
-<input type='radio' name='power_external' value='0' %s>No\
-<input type='radio' name='power_external' value='1' %s>Yes\
+<input type='radio' name='power_ext' value='0' %s>No\
+<input type='radio' name='power_ext' value='1' %s>Yes\
 </td>\
 </tr>\
 <tr>\
@@ -1294,11 +1365,11 @@ void handleSettings() {
 <input type='radio' name='no_track' value='1' %s>On\
 </td>\
 </tr>"),
-  geoid_from_setting,
+  settings->geoid,
   (settings->power_save == POWER_SAVE_NONE ? "selected" : ""), POWER_SAVE_NONE,
   (settings->power_save == POWER_SAVE_WIFI ? "selected" : ""), POWER_SAVE_WIFI,
 //(settings->power_save == POWER_SAVE_GNSS ? "selected" : ""), POWER_SAVE_GNSS,
-  (!settings->power_external ? "checked" : "") , (settings->power_external ? "checked" : ""),
+  (!settings->power_ext ? "checked" : "") , (settings->power_ext ? "checked" : ""),
   (settings->relay==RELAY_OFF    ? "selected" : ""), RELAY_OFF,
   (settings->relay==RELAY_LANDED ? "selected" : ""), RELAY_LANDED,
   (settings->relay==RELAY_ALL    ? "selected" : ""), RELAY_ALL,
@@ -1502,10 +1573,10 @@ void handleRoot() {
   unsigned int sats = gnss.satellites.value(); // Number of satellites in use (u32)
   char str_lat[16];
   char str_lon[16];
-  //char str_alt[16];
+  char str_alt[16];
   char str_Vcc[8];
 
-  size_t size = 4000;
+  size_t size = 4500;
   char *Root_temp = (char *) malloc(size);
   if (Root_temp == NULL) {
     Serial.println(F(">>> not enough RAM"));
@@ -1514,8 +1585,7 @@ void handleRoot() {
 
   dtostrf(ThisAircraft.latitude,  8, 4, str_lat);
   dtostrf(ThisAircraft.longitude, 8, 4, str_lon);
-  //dtostrf(ThisAircraft.altitude-ThisAircraft.geoid_separation, 5, 0, str_alt);   // MSL
-  unsigned int alt = (unsigned int)(ThisAircraft.altitude-ThisAircraft.geoid_separation);   // MSL
+  dtostrf(ThisAircraft.altitude-ThisAircraft.geoid_separation, 7, 1, str_alt);   // MSL
   dtostrf(vdd, 4, 2, str_Vcc);
 
   char adsb_packets[72];
@@ -1526,15 +1596,15 @@ void handleRoot() {
          adsb_packets_counter);
   }
 
-  char traffics[32];
+  char traffics[24];
   int acrfts_counter = Traffic_Count();   // maxrssi and adsb_acfts are byproducts
   if (acrfts_counter == 0) {
     traffics[0] = '0';
     traffics[1] = '\0';
   } else if (adsb_acfts > 0) {
-    snprintf(traffics, 32, "%d&nbsp;&nbsp;(%d ADS-B)", acrfts_counter, adsb_acfts);
+    snprintf(traffics, 24, "%d&nbsp;(%d ADS-B)", acrfts_counter, adsb_acfts);
   } else {
-    snprintf(traffics, 32, "%d&nbsp;&nbsp;(max RSSI %d)", acrfts_counter, maxrssi);
+    snprintf(traffics, 24, "%d&nbsp;(max RSSI %d)", acrfts_counter, maxrssi);
   }
 
   snprintf_P ( Root_temp, size,
@@ -1545,10 +1615,7 @@ void handleRoot() {
  </head>\
 <body>\
  <table width=100%%>\
-  <tr><!-- <td align=left><h1>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</h1></td> -->\
-  <td align=center><h1>SoftRF status</h1></td>\
-  <!-- <td align=right><img src='/logo.png'></td> --></tr>\
- %s\
+  <tr><td align=center><h1>SoftRF status</h1></td></tr>\
  %s\
  </table>\
  <table width=100%%>\
@@ -1567,7 +1634,8 @@ void handleRoot() {
   <tr><td align=left><table><tr><th align=left>Baro&nbsp;&nbsp;</th><td align=right>%s</td></tr></table></td>\
   <td align=right><table><tr><th align=left>AHRS&nbsp;&nbsp;</th><td align=right>%s</td></tr></table></td></tr>"
 #endif /* ENABLE_AHRS */
- "<tr><th align=left>Uptime</th><td align=right>%02d:%02d:%02d</td></tr>\
+ "<tr><th align=left>ADS-B receiver %spresent</th></tr>\
+  <tr><th align=left>Uptime</th><td align=right>%02d:%02d:%02d</td></tr>\
   <tr><th align=left>Free memory</th><td align=right>%u</td></tr>\
   <tr><th align=left>Battery voltage</th><td align=right><font color=%s>%s</font></td></tr>\
  </table>\
@@ -1578,11 +1646,11 @@ void handleRoot() {
   </tr>\
   %s\
   <tr><th align=left>Current traffic</th>\
-   <td align=middle>&nbsp;</td>\
    <td align=right>%s</td>\
   </tr>\
   <tr><td align=left>\
-   <input type=button onClick=\"location.href='/landed_out'\" value='Landed-Out Mode'>&nbsp;&nbsp;%s</td>\
+   <input type=button onClick=\"location.href='/landed_out'\" value='Landed-Out Mode'></td>\
+   <td align=right>%s</td>\
   </tr>\
  </table>\
  <hr>\
@@ -1592,18 +1660,26 @@ void handleRoot() {
   <tr><th align=left>Satellites</th><td align=right>%d</td></tr>\
   <tr><th align=left>Latitude</th><td align=right>%s</td></tr>\
   <tr><th align=left>Longitude</th><td align=right>%s</td></tr>\
-  <tr><td align=left><b>Altitude</b>&nbsp;(%s)&nbsp;&nbsp;(%s)</td>\
-   <td align=right>%d</td>\
-  </tr>\
-  <tr><td align=right>%s</td></tr>\
+  <tr><td align=left><b>Altitude</b>&nbsp;(%s)</td><td align=right>%s&nbsp;(%s)</td></tr>\
+  %s\
  </table>\
- <hr>&nbsp;<br>\
+ <br><hr><br>\
  <table width=100%%>\
   <tr>\
    <td><input type=button onClick=\"location.href='/settings'\" value='Settings'></td>\
    <td><input type=button onClick=\"location.href='/reboot'\" value='Reboot'></td>\
    <td><input type=button onClick=\"location.href='/firmware'\" value='Firmware update'></td>\
    <td><input type=button onClick=\"location.href='/about'\" value='About'></td>\
+  </tr>\
+ </table>\
+ <br><hr>\
+ Settings file:\
+ <table width=100%%>\
+  <tr>\
+   <td><input type=button onClick=\"location.href='/settingsdownload'\" value='Download'></td>\
+   <td><input type=button onClick=\"location.href='/settingsupload'\" value='Upload'></td>\
+   <td><input type=button onClick=\"location.href='/settingsbackup'\" value='Backup'></td>\
+   <td><input type=button onClick=\"location.href='/settingsswap'\" value='Restore/Swap'></td>\
   </tr>\
  </table>\
  <hr>\
@@ -1618,9 +1694,9 @@ void handleRoot() {
   </tr>\
  </table>\
  <hr>\
+ Alarm Log:\
  <table width=100%%>\
   <tr>\
-   <td>Alarm Log:</td>\
    <td><input type=button onClick=\"location.href='/alarmlog'\" value='Download'></td>\
    <td><input type=button onClick=\"location.href='/clearlog'\" value='Clear'></td>\
   </tr>\
@@ -1630,10 +1706,12 @@ void handleRoot() {
 </html>"),
     ((settings->debug_flags & DEBUG_SIMULATE)?
        "<tr><td align=center><h4>(Warning: simulation mode (debug flag 20))</h4></td></tr>" :
-    (default_settings_used ?
-       "<tr><td align=center><h4>(Warning: reverted to default settings)</h4></td></tr>" : "")),
+    (default_settings_used==STG_DEFAULT ?
+       "<tr><td align=center><h4>(Warning: reverted to default settings)</h4></td></tr>" :
     (BTpaused ?
-       "<tr><td align=center><h4>(Bluetooth paused, reboot to resume)</h4></td></tr>" : ""),
+       "<tr><td align=center><h4>(Bluetooth paused, reboot to resume)</h4></td></tr>" :
+    (default_settings_used==STG_EEPROM ?
+       "<tr><td align=center><h4>(Warning: reverted to EEPROM settings)</h4></td></tr>" : "")))),
     (SoC->getChipId() & 0x00FFFFFF), ThisAircraft.addr, SOFTRF_FIRMWARE_VERSION,
     (SoC == NULL ? "NONE" : SoC->name),
     GNSS_name[hw_info.gnss],
@@ -1642,6 +1720,7 @@ void handleRoot() {
 #if defined(ENABLE_AHRS)
     (ahrs_chip == NULL ? "NONE" : ahrs_chip->name),
 #endif /* ENABLE_AHRS */
+    (rx1090found? "" : "not "),
     hr, min % 60, sec % 60, ESP.getFreeHeap(),
     low_voltage ? "red" : "green", str_Vcc,
     tx_packets_counter, rx_packets_counter, adsb_packets, traffics,
@@ -1651,10 +1730,11 @@ void handleRoot() {
           (ThisAircraft.geoid_separation==0 ? "above ellipsoid - MSL n.a."
            : "above MSL")
            : "no valid fix"),
-    (ThisAircraft.airborne? "Airborne" : "Not Airborne"),
-    alt,
+    str_alt, (ThisAircraft.airborne? "Airborne" : "Not Airborne"),
     ((hw_info.model == SOFTRF_MODEL_PRIME_MK2) ?
- "<input align=middle type=button onClick=\"location.href='/gps_reset'\" value='Reset GNSS'>"
+ "<tr><td align=middle>\
+  <input type=button onClick=\"location.href='/gps_reset'\" value='Reset GNSS'>\
+ </td></tr>"
           : ""),
     num_wav_files,
 #if defined(USE_EGM96)
@@ -1663,6 +1743,7 @@ void handleRoot() {
  "",
 #endif
 #if defined(USE_SD_CARD)
+(SDfileOpen?
  "<hr>\
  Flight Logs:\
  <table width=100%%>\
@@ -1672,7 +1753,7 @@ void handleRoot() {
    <td><input type=button onClick=\"location.href='/clearlogs'\" value='Clear'></td>\
    <td><input type=button onClick=\"location.href='/clearoldlogs'\" value='Empty trash'></td>\
   </tr>\
- </table>"
+ </table>" : "")
 #else
  ""
 #endif
@@ -1712,147 +1793,17 @@ void handleRoot() {
 }
 
 void handleInput() {
-
-  char idbuf[6 + 1];
-
+  Serial.println(F("Settings from web page:"));
   for ( uint8_t i = 0; i < server.args(); i++ ) {
-    if (server.argName(i).equals("mode")) {
-      settings->mode = server.arg(i).toInt();
-    } else if (server.argName(i).equals("protocol")) {
-      settings->rf_protocol = server.arg(i).toInt();
-    } else if (server.argName(i).equals("band")) {
-      settings->band = server.arg(i).toInt();
-    } else if (server.argName(i).equals("acft_type")) {
-      settings->aircraft_type = server.arg(i).toInt();
-    } else if (server.argName(i).equals("alarm")) {
-      settings->alarm = server.arg(i).toInt();
-    } else if (server.argName(i).equals("txpower")) {
-      settings->txpower = server.arg(i).toInt();
-    } else if (server.argName(i).equals("volume")) {
-      settings->volume = server.arg(i).toInt();
-    } else if (server.argName(i).equals("strobe")) {
-      settings->strobe = server.arg(i).toInt();
-//    } else if (server.argName(i).equals("alarm_demo")) {
-//      settings->alarm_demo = server.arg(i).toInt();
-    } else if (server.argName(i).equals("pointer")) {
-      settings->pointer = server.arg(i).toInt();
-    } else if (server.argName(i).equals("voice")) {
-      settings->voice = server.arg(i).toInt();
-    } else if (server.argName(i).equals("bluetooth")) {
-      settings->bluetooth = server.arg(i).toInt();
-    } else if (server.argName(i).equals("tcpmode")) {
-      settings->tcpmode = server.arg(i).toInt();
-    } else if (server.argName(i).equals("tcpport")) {
-      settings->tcpport = server.arg(i).toInt();
-    } else if (server.argName(i).equals("ssid")) {
-      strncpy(settings->ssid, server.arg(i).c_str(), sizeof(settings->ssid)-1);
-      settings->ssid[sizeof(settings->ssid)-1] = '\0';
-    } else if (server.argName(i).equals("psk")) {
-        //if (strcmp(server.arg(i).c_str()),"hidepass")
+    if (server.argName(i).equals(stgdesc[STG_PSK].label)) {
         if (! server.arg(i).equals("hidepass")) {
             strncpy(settings->psk, server.arg(i).c_str(), sizeof(settings->psk)-1);
             settings->psk[sizeof(settings->psk)-1] = '\0';
         }
-    } else if (server.argName(i).equals("host_ip")) {
-      strncpy(settings->host_ip, server.arg(i).c_str(), sizeof(settings->host_ip)-1);
-      settings->host_ip[sizeof(settings->host_ip)-1] = '\0';
-    } else if (server.argName(i).equals("nmea_out")) {
-      settings->nmea_out = server.arg(i).toInt();
-    } else if (server.argName(i).equals("nmea_g")) {
-      settings->nmea_g = server.arg(i).toInt();
-    } else if (server.argName(i).equals("nmea_p")) {
-      settings->nmea_p = server.arg(i).toInt();
-    } else if (server.argName(i).equals("nmea_l")) {
-      settings->nmea_l = server.arg(i).toInt();
-    } else if (server.argName(i).equals("nmea_s")) {
-      settings->nmea_s = server.arg(i).toInt();
-    } else if (server.argName(i).equals("nmea_d")) {
-      settings->nmea_d = server.arg(i).toInt();
-    } else if (server.argName(i).equals("nmea_e")) {
-      settings->nmea_e = server.arg(i).toInt();
-    } else if (server.argName(i).equals("nmea_out2")) {
-      settings->nmea_out2 = server.arg(i).toInt();
-    } else if (server.argName(i).equals("nmea2_g")) {
-      settings->nmea2_g = server.arg(i).toInt();
-    } else if (server.argName(i).equals("nmea2_p")) {
-      settings->nmea2_p = server.arg(i).toInt();
-    } else if (server.argName(i).equals("nmea2_l")) {
-      settings->nmea2_l = server.arg(i).toInt();
-    } else if (server.argName(i).equals("nmea2_s")) {
-      settings->nmea2_s = server.arg(i).toInt();
-    } else if (server.argName(i).equals("nmea2_d")) {
-      settings->nmea2_d = server.arg(i).toInt();
-    } else if (server.argName(i).equals("nmea2_e")) {
-      settings->nmea2_e = server.arg(i).toInt();
-    } else if (server.argName(i).equals("baud_rate")) {
-      settings->baud_rate = server.arg(i).toInt();
-    } else if (server.argName(i).equals("altpin0")) {
-      settings->altpin0 = server.arg(i).toInt();
-    } else if (server.argName(i).equals("baudrate2")) {
-      settings->baudrate2 = server.arg(i).toInt();
-    } else if (server.argName(i).equals("invert2")) {
-      settings->invert2 = server.arg(i).toInt();
-    } else if (server.argName(i).equals("alt_udp")) {
-      settings->alt_udp = server.arg(i).toInt();
-    } else if (server.argName(i).equals("rx1090")) {
-      settings->rx1090 = server.arg(i).toInt();
-    } else if (server.argName(i).equals("mode_s")) {
-      settings->mode_s = server.arg(i).toInt();
-    } else if (server.argName(i).equals("gdl90_in")) {
-      settings->gdl90_in = server.arg(i).toInt();
-    } else if (server.argName(i).equals("gdl90")) {
-      settings->gdl90 = server.arg(i).toInt();
-    } else if (server.argName(i).equals("d1090")) {
-      settings->d1090 = server.arg(i).toInt();
-    } else if (server.argName(i).equals("relay")) {
-      settings->relay = server.arg(i).toInt();
-    } else if (server.argName(i).equals("stealth")) {
-      settings->stealth = server.arg(i).toInt();
-    } else if (server.argName(i).equals("no_track")) {
-      settings->no_track = server.arg(i).toInt();
-    } else if (server.argName(i).equals("power_save")) {
-      settings->power_save = server.arg(i).toInt();
-    } else if (server.argName(i).equals("power_external")) {
-      settings->power_external = server.arg(i).toInt();
-    } else if (server.argName(i).equals("rfc")) {
-      settings->freq_corr = server.arg(i).toInt();
-    } else if (server.argName(i).equals("id_method")) {
-      settings->id_method = server.arg(i).toInt();
-    } else if (server.argName(i).equals("aircraft_id")) {
-      server.arg(i).toCharArray(idbuf, sizeof(idbuf));
-      settings->aircraft_id = strtoul(idbuf, NULL, 16);
-    } else if (server.argName(i).equals("ignore_id")) {
-      server.arg(i).toCharArray(idbuf, sizeof(idbuf));
-      settings->ignore_id = strtoul(idbuf, NULL, 16);
-    } else if (server.argName(i).equals("follow_id")) {
-      server.arg(i).toCharArray(idbuf, sizeof(idbuf));
-      settings->follow_id = strtoul(idbuf, NULL, 16);
-    } else if (server.argName(i).equals("alarmlog")) {
-      server.arg(i).toCharArray(idbuf, sizeof(idbuf));
-      settings->logalarms = strtoul(idbuf, NULL, 16);
-    } else if (server.argName(i).equals("gnss_pins")) {
-      settings->gnss_pins = server.arg(i).toInt();
-    } else if (server.argName(i).equals("ppswire")) {
-      settings->ppswire = server.arg(i).toInt();
-    } else if (server.argName(i).equals("sd_card")) {
-      settings->sd_card = server.arg(i).toInt();
-    } else if (server.argName(i).equals("logflight")) {
-      settings->logflight = server.arg(i).toInt();
-    } else if (server.argName(i).equals("loginterval")) {
-      settings->loginterval = server.arg(i).toInt();
-    } else if (server.argName(i).equals("geoid")) {
-      geoid_from_setting = server.arg(i).toInt();
-      if (geoid_from_setting >   84)  geoid_from_setting =   84;
-      if (geoid_from_setting < -104)  geoid_from_setting = -104;
-      settings->geoid = enscale(geoid_from_setting+10, 5, 1, 1);
-    } else if (server.argName(i).equals("debug_flags")) {
-      server.arg(i).toCharArray(idbuf, 3);
-      settings->debug_flags = strtoul(idbuf, NULL, 16) & 0x3F;
-
 #if defined(USE_OGN_ENCRYPTION)
     } else if (server.argName(i).equals("igc_key")) {
-        char buf[32 + 1];
         uint32_t key;
+        char buf[32 + 1];
         server.arg(i).toCharArray(buf, sizeof(buf));
         key = strtoul(buf + 24, NULL, 16);
         if (key != 0x88888888)  settings->igc_key[3] = key;
@@ -1866,6 +1817,21 @@ void handleInput() {
         key = strtoul(buf + 0, NULL, 16);
         if (key != 0x88888888)  settings->igc_key[0] = key;
 #endif
+    } else {
+        char p[32];
+        char q[32];
+        server.argName(i).toCharArray(p, sizeof(p));
+        server.arg(i).toCharArray(q, sizeof(q));
+        for (int i=STG_MODE; i<STG_END; i++) {
+            if (try_match_setting(p, q, i))
+                break;
+        }
+        if (i == STG_END) {
+            Serial.print(p);
+            Serial.print(",");
+            Serial.print(q);
+            Serial.println("  - invalid");
+        }
     }
     yield();
   }                // end for (server.args())
@@ -2022,10 +1988,15 @@ void handleInput() {
   }
 
   /* if winch mode, use full transmission power */
-  if (settings->aircraft_type == AIRCRAFT_TYPE_WINCH && settings->txpower == RF_TX_POWER_LOW)
+  if (settings->acft_type == AIRCRAFT_TYPE_WINCH && settings->txpower == RF_TX_POWER_LOW)
       settings->txpower == RF_TX_POWER_FULL;
 
-  /* show new settings before rebooting */
+  // if SSID but no password, copy ssid to myssid, it is for AP mode
+  if (settings->ssid[0] != '\0' && settings->psk[0] == '\0')
+      strcpy(settings->myssid, settings->ssid);
+
+#if 0
+  /* (do not) show new settings in a web page before rebooting */
   size_t size = 3900;
   char *Input_temp = (char *) malloc(size);
   if (Input_temp != NULL) {
@@ -2103,7 +2074,7 @@ PSTR("<html>\
     settings->mode, settings->aircraft_id, settings->id_method,
     settings->ignore_id, settings->follow_id,
     settings->rf_protocol, settings->band,
-    settings->aircraft_type, settings->alarm, settings->txpower,
+    settings->acft_type, settings->alarm, settings->txpower,
     settings->volume, settings->strobe, settings->pointer, settings->voice,
     settings->baud_rate, settings->altpin0, settings->baudrate2,
     settings->invert2, settings->alt_udp, settings->bluetooth,
@@ -2116,8 +2087,8 @@ PSTR("<html>\
     BOOL_STR(settings->nmea2_s), BOOL_STR(settings->nmea2_d), BOOL_STR(settings->nmea2_e),
     settings->rx1090, settings->mode_s, settings->gdl90_in, settings->gdl90, settings->d1090,
     settings->relay, BOOL_STR(settings->stealth), BOOL_STR(settings->no_track),
-    settings->power_save, settings->power_external, settings->freq_corr,
-    settings->gnss_pins, settings->ppswire, geoid_from_setting,
+    settings->power_save, settings->power_ext, settings->freq_corr,
+    settings->gnss_pins, settings->ppswire, settings->geoid,
     settings->sd_card, settings->logalarms, settings->debug_flags,
   //  settings->igc_key[0], settings->igc_key[1], settings->igc_key[2], settings->igc_key[3]
     (settings->igc_key[0]? 0x88888888 : 0),
@@ -2126,18 +2097,12 @@ PSTR("<html>\
     (settings->igc_key[3]? 0x88888888 : 0)
         /* do not show the existing secret key */
     );
-    server.send ( 200, "text/html", Input_temp );
+    server.send (200, "text/html", Input_temp );
     delay(1000);
     free(Input_temp);
   }
-
-  Serial.println(F("New settings:"));
-  show_settings_serial();
-
-  SoC->WDT_fini();
-  if (SoC->Bluetooth_ops) { SoC->Bluetooth_ops->fini(); }
-  EEPROM_store();
-  reboot();
+#endif
+  settingsreboot();
 }
 
 void handleNotFound() {
@@ -2428,13 +2393,13 @@ void Web_setup()
         show_zone_stats();
   } );
 
-  server.on( "/landed_out", []() {
+  server.on ( "/landed_out", []() {
     landed_out_mode = true;
     OLED_msg("LANDED", "OUT");
     server.send(200, textplain, "LANDED-OUT MODE STARTED");
   } );
 
-  server.on( "/testmode", []() {
+  server.on ( "/testmode", []() {
       test_mode = !test_mode;
       if (test_mode) {
           OLED_msg("TEST",   " MODE");
@@ -2448,7 +2413,7 @@ void Web_setup()
       do_test_mode();
   } );
 
-  server.on( "/gps_reset", []() {
+  server.on ( "/gps_reset", []() {
     Serial.println(F("Factory Reset GNSS..."));
     gnss_needs_reset = true;
     server.send(200, textplain, "Factory reset & cold-start GNSS...");
@@ -2462,7 +2427,7 @@ void Web_setup()
     serve_P_html(wav_upload_html);
   } );
 
-  server.on("/dowavupld", HTTP_POST,  // if the client posts to the upload page
+  server.on ("/dowavupld", HTTP_POST,  // if the client posts to the upload page
     [](){ server.send(200); },        // Send 200 to tell the client we are ready to receive
     wavUpload                         // Receive and save the file
   );
@@ -2471,7 +2436,7 @@ void Web_setup()
     serve_P_html(egm96_upload_html);
   } );
 
-  server.on("/doegmupld", HTTP_POST,  // if the client posts to the upload page
+  server.on ("/doegmupld", HTTP_POST,  // if the client posts to the upload page
     [](){ server.send(200); },        // Send 200 to tell the client we are ready to receive
     egmUpload                         // Receive and save the file
   );
@@ -2481,22 +2446,33 @@ void Web_setup()
     serve_P_html(log_upload_html);
   } );
 
-  server.on("/dologupld", HTTP_POST,  // if the client posts to the upload page
+  server.on ("/dologupld", HTTP_POST,  // if the client posts to the upload page
     [](){ server.send(200); },        // Send 200 to tell the client we are ready to receive
     logUpload                         // Receive and save the file
   );
 #endif
 
-  server.on( "/format", []() {
+  server.on ( "/format", []() {
     clear_waves();
     Serial.println(F("Formatting spiffs..."));
     SPIFFS.format();
     server.send(200, textplain, "SPIFFS cleared");
   } );
 
+  server.on ( "/settingsupload", []() {
+    serve_P_html(settings_upload_html);
+  } );
+  server.on ("/dostgupld", HTTP_POST,  // if the client posts to the upload page
+    [](){ server.send(200); },        // Send 200 to tell the client we are ready to receive
+    settingsupload                    // Receive and save the file
+  );
+  server.on ( "/settingsdownload", settingsdownload );
+  server.on ( "/settingsbackup",   settingsbackup );
+  server.on ( "/settingsswap",     settingsswap );
+
   server.on ( "/alarmlog", alarmlogfile );
 
-  server.on( "/clearlog", []() {
+  server.on ( "/clearlog", []() {
     if (SPIFFS.exists("/alarmlog.txt")) {
         if (AlarmLogOpen) {
           AlarmLog.close();
@@ -2521,7 +2497,7 @@ void Web_setup()
         handleNotFound();
   });
 
-  server.on("/firmware", HTTP_GET, [](){
+  server.on ("/firmware", HTTP_GET, [](){
     SoC->swSer_enableRx(false);
     stop_bluetooth((size_t)999999);
     server.sendHeader(String(F("Connection")), String(F("close")));
@@ -2556,7 +2532,7 @@ void Web_setup()
   SoC->swSer_enableRx(true);
   });
 
-  server.on("/update", HTTP_POST, [](){
+  server.on ("/update", HTTP_POST, [](){
     SoC->swSer_enableRx(false);
 #if defined(USE_SD_CARD)
     closeFlightLog();

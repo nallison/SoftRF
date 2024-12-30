@@ -41,7 +41,7 @@ typedef struct barochip_ops_struct {
   const char name[10];
   bool (*probe)();
   void (*setup)();
-  float (*altitude)(float);
+  float (*altitude)();
   float (*pressure)();
   float (*temperature)();
 } barochip_ops_t;

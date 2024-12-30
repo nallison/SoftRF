@@ -2324,7 +2324,7 @@ static byte ESP32_Display_setup()
             u8x8->draw2x2String( 2, 1, SoftRF_text1);
         u8x8->drawString( 1, 4, "ver");
         u8x8->draw2x2String( 5, 4, SOFTRF_FIRMWARE_VERSION);
-        u8x8->draw2x2String( 1, 6, default_settings_used? DFLT_text : USER_text);
+        u8x8->draw2x2String( 1, 6, default_settings_used==STG_DEFAULT? DFLT_text : USER_text);
         u8x8->drawString( 10, 7, "stgs");
 
       }

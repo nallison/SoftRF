@@ -1677,7 +1677,7 @@ Serial.println("ignoring S - have recent P");
 static void send5892(const char *cmd)
 {
     Serial2.print(cmd);
-    Serial2.print("\r");
+    Serial2.print("\r\n");
 }
 
 void play5892()
@@ -1688,6 +1688,7 @@ void play5892()
         send5892("#49-03");                     // only DF 17 and 18, no RSSI
     //paused = false;
     //Serial.println("(GNS5892 un-paused)");
+    rx1090found = false;    // will be reset to true when a response arrives
 }
 
 static void pause5892()
@@ -1705,8 +1706,7 @@ static void reset5892()
 {
     Serial.println("(resetting GNS5892...)");
     send5892("#FF");
-    //play5892();
-    //delay(300);
+    delay(300);
 }
 
 void gns5892_setup()
@@ -1719,12 +1719,25 @@ void gns5892_setup()
 
   CPRRelative_setup();
 
-  delay(200);
   pause5892();
   delay(200);
   reset5892();
-  delay(1200);
+  delay(2000);
   pause5892();
+  delay(200);
+  int limit = 2000;
+  while (Serial2.available() && --limit>0)  Serial2.read();
+  send5892("#00");    // query module firmware version
+  delay(400);
+  limit = 2000;
+  while (Serial2.available() && --limit>0) {
+      if (Serial2.read()=='#')
+          rx1090found = true;
+  }
+  if (rx1090found)
+      Serial.println(F(">>> GNS5892 module responded"));
+  else
+      Serial.println(F(">>> GNS5892 module did not respond yet"));
 }
 
 
@@ -1746,12 +1759,12 @@ void gns5892_loop()
 
   static uint32_t playtime = 0;
   // do not unpause GNS5892 until CPRRelative_precomp() has set reflat
-  if ((playtime == 0 || millis() > playtime + 57700) && reflat != 0) {
-      if (settings->debug_flags & DEBUG_DEEPER) {
-        Serial.printf("ThisAircraft.baro_alt_diff = %.0f\r\n", ThisAircraft.baro_alt_diff);
-        Serial.printf("OthAcfts Avg baro_alt_diff = %.0f\r\n", average_baro_alt_diff);
-      }
+  if ((millis() > playtime + (rx1090found? 57700 : 1200)) && (reflat != 0 || !rx1090found)) {
       play5892();            // start GNS5892, and try and capture a #49 response
+      if ((settings->debug_flags & DEBUG_DEEPER) && (reflat != 0 && rx1090found)) {
+          Serial.printf("ThisAircraft.baro_alt_diff = %.0f\r\n", ThisAircraft.baro_alt_diff);
+          Serial.printf("OthAcfts Avg baro_alt_diff = %.0f\r\n", average_baro_alt_diff);
+      }
       playtime = millis();
   }
 
@@ -1790,15 +1803,16 @@ void gns5892_loop()
   if (buf1090[0] == '*' || buf1090[0] == '+') {    // ADS-B data received
       (void) parse(buf1090, n);
       yield();
-  } else if (buf1090[0] == '#') {                  // response to commands
-      //if (rx1090found == false) {
-        if (buf1090[1]=='4' && buf1090[2]=='9') {  // response to "play"
-            rx1090found = true;
-            Serial.println(">>> GNS5892 module responded:");
-        }
-      //}
-      Serial.write(buf1090, n);           // copy to console
+  } else if (buf1090[0] == '#') {                 // response to commands
+      Serial.write(buf1090, n);                   // copy to console
       Serial.println("");
+      if (buf1090[1]=='4' && buf1090[2]=='9') {   // response to "play"
+          rx1090found = true;
+          Serial.println(F(">>> GNS5892 module responded:"));
+          char buf[16];
+          snprintf(buf, 16, "#39-00-00-%02X", settings->rx1090x);  // set comparator offset
+          send5892(buf);
+      }
   }
 
   NMEA_bridge_sent = true;   // not really sent, but substantial processing

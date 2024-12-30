@@ -2335,8 +2335,8 @@ void LookupSeparation(float lat, float lon)
 
 float EGM96GeoidSeparation()
 {
-    if (geoid_from_setting != 0)                  // zero means n.a.
-        return (float) geoid_from_setting;
+    if (settings->geoid != 0)                  // zero means n.a.
+        return (float) settings->geoid;
     static uint32_t when_loaded = 0;
     if ((when_loaded == 0 || millis() > when_loaded + 1200000)    // every 20 minutes
              && isValidGNSSFix()) {
@@ -2349,8 +2349,8 @@ float EGM96GeoidSeparation()
 #else
 float EGM96GeoidSeparation()
 {
-    float rval = (float) geoid_from_setting;
-    if (geoid_from_setting == 0)
+    float rval = (float) settings->geoid;
+    if (settings->geoid == 0)
         rval += 0.1;                   // zero means n.a.
     return rval;
 }

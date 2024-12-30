@@ -165,8 +165,10 @@ void setup()
   Serial.print(" ");
   Serial.print(SoC->name);
   Serial.print(F(" FW.REV: " SOFTRF_FIRMWARE_VERSION " DEV.ID: "));
-  Serial.println(String(SoC->getChipId(), HEX));
+  //Serial.println(String(SoC->getChipId(), HEX));
+  Serial.println(SoC->getChipId(), HEX);
   Serial.println(F("Copyright (C) 2015-2021 Linar Yusupov. All rights reserved."));
+  Serial.println(F("This fork by Moshe Braner, 2024"));
   Serial.flush();
 
   if (resetInfo) {
@@ -288,7 +290,7 @@ Serial.println(F("... Baro_setup() returned"));
 #endif /* EXCLUDE_MAVLINK */
   {
     hw_info.gnss = GNSS_setup();
-    ThisAircraft.aircraft_type = settings->aircraft_type;
+    ThisAircraft.aircraft_type = settings->acft_type;
   }
   ThisAircraft.protocol = settings->rf_protocol;
   ThisAircraft.stealth  = settings->stealth;

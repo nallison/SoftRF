@@ -247,6 +247,21 @@ TinyGPSCustom D_voice;
 TinyGPSCustom D_strobe;
 
 TinyGPSCustom F_Version;   /* 1 */
+TinyGPSCustom F_rx1090;
+TinyGPSCustom F_rx1090x;
+TinyGPSCustom F_mode_s;
+TinyGPSCustom F_gdl90_in;
+TinyGPSCustom F_gnss_pins;
+TinyGPSCustom F_ppswire;
+TinyGPSCustom F_logalarms;
+TinyGPSCustom F_sd_card;
+TinyGPSCustom F_logflight;
+TinyGPSCustom F_loginterval;
+TinyGPSCustom F_alt_udp;
+TinyGPSCustom F_tcpmode;
+TinyGPSCustom F_tcpport;
+TinyGPSCustom F_geoid;
+TinyGPSCustom F_freq_corr;  /* 15 */
 
 TinyGPSCustom T_testmode;
 
@@ -473,6 +488,21 @@ void NMEA_setup()
   const char *psrf_f = "PSRFF";
   term_num = 1;
   F_Version.begin       (gnss, psrf_f, term_num++); /* 1 */
+  F_rx1090.begin        (gnss, psrf_f, term_num++);
+  F_rx1090x.begin       (gnss, psrf_f, term_num++);
+  F_mode_s.begin        (gnss, psrf_f, term_num++);
+  F_gdl90_in.begin      (gnss, psrf_f, term_num++);
+  F_gnss_pins.begin     (gnss, psrf_f, term_num++);
+  F_ppswire.begin       (gnss, psrf_f, term_num++);
+  F_logalarms.begin     (gnss, psrf_f, term_num++);
+  F_sd_card.begin       (gnss, psrf_f, term_num++);
+  F_logflight.begin     (gnss, psrf_f, term_num++);
+  F_loginterval.begin   (gnss, psrf_f, term_num++);
+  F_alt_udp.begin       (gnss, psrf_f, term_num++);
+  F_tcpmode.begin       (gnss, psrf_f, term_num++);
+  F_tcpport.begin       (gnss, psrf_f, term_num++);
+  F_geoid.begin         (gnss, psrf_f, term_num++);
+  F_freq_corr.begin     (gnss, psrf_f, term_num++); /* 15 */
 
   const char *psrf_t = "PSRFT";
   term_num = 1;
@@ -924,7 +954,7 @@ void NMEA_loop()
 
   sendPFLAV(false);
 
-  if ((settings->nmea_s || settings->nmea2_s)
+  if ((settings->nmea_s || settings->nmea2_s) && (baro_chip != NULL)
       && ThisAircraft.pressure_altitude != 0.0 && isTimeToPGRMZ()) {
 
     int altitude = constrain(
@@ -938,6 +968,8 @@ void NMEA_loop()
     unsigned int nmealen = NMEA_add_checksum();
     NMEA_Outs(settings->nmea_s, settings->nmea2_s, NMEABuffer, nmealen, false);
 
+#if 0
+// moved to baro_loop()
 #if !defined(EXCLUDE_LK8EX1)
     char str_Vcc[6];
     dtostrf(Battery_voltage(), 3, 1, str_Vcc);
@@ -952,6 +984,7 @@ void NMEA_loop()
     NMEA_Outs(settings->nmea_s, settings->nmea2_s, NMEABuffer, nmealen, false);
 
 #endif /* EXCLUDE_LK8EX1 */
+#endif
 
     PGRMZ_TimeMarker = millis();
   }
@@ -1392,10 +1425,12 @@ if (settings->debug_flags) {
     beatcount = 0;
 
 #if !defined(EXCLUDE_SOFTRF_HEARTBEAT)
+    int nacft = Traffic_Count();   // maxrssi and adsb_acfts are byproducts
     snprintf_P(NMEABuffer, sizeof(NMEABuffer),
-            PSTR("$PSRFH,%06X,%d,%d,%d,%d,%d,%d*"),
+            PSTR("$PSRFH,%06X,%d,%d,%d,%d,%d,%d,%d,%d*"),
             ThisAircraft.addr,settings->rf_protocol,
-            rx_packets_counter,tx_packets_counter,millis(),(int)(voltage*100),ESP.getFreeHeap());
+            millis(),(int)(voltage*100),ESP.getFreeHeap(),
+            rx_packets_counter,tx_packets_counter,nacft,maxrssi);
     nmealen = NMEA_add_checksum();
     NMEA_Outs(settings->nmea_l, settings->nmea2_l, NMEABuffer, nmealen, false);
 #endif /* EXCLUDE_SOFTRF_HEARTBEAT */
@@ -1564,13 +1599,16 @@ void nmea_cfg_reply()
 
 static void nmea_cfg_restart(bool save_settings)
 {
-  SoC->WDT_fini();
-  if (SoC->Bluetooth_ops) { SoC->Bluetooth_ops->fini(); }
-  if (save_settings)
-      EEPROM_store();
+  if (save_settings) {
+      //EEPROM_store();
+      save_settings_to_file();   // this also shows the new settings
+  }
   Serial.println();
   Serial.println(F("Restart is in progress. Please, wait..."));
   Serial.println();
+  SoC->WDT_fini();
+  if (SoC->Bluetooth_ops) { SoC->Bluetooth_ops->fini(); }
+  delay(2000);
   reboot();
 }
 
@@ -1590,26 +1628,75 @@ bool ishexdigit(const char *p)
 
 bool cfg_is_updated;
 
-int updated(TinyGPSCustom &field, const char *label, int cur_val)
+void tryupdate(TinyGPSCustom &field, int idx)
 {
     const char *p = field.value();
     if (p[0] == '\0')              // empty field
-        return cur_val;
-    int cfg_val = cur_val;
-    if (isdecdigit(p)) {
-        cfg_val = atoi(p);
-        p = "not changed, still";
-    } else {
-        p = "given value invalid, left as";
+        return;
+    int8_t t = stgdesc[idx].type;
+    if (t == STG_VOID)
+        return;
+    const char *label = stgdesc[idx].label;
+    const char *msg = "not changed, still";
+    char *v  = stgdesc[idx].value;
+    int32_t cur_val, cfg_val;
+    switch (t) {
+    case STG_INT1:
+    case STG_UINT1:
+       cur_val = (t==STG_INT1? (*(int8_t*)v) : (*(uint8_t*)v));
+       cfg_val = cur_val;
+       if (isdecdigit(p))
+           cfg_val = atoi(p);
+       else
+           msg = "given value invalid, left as";
+       if (cfg_val != cur_val) {
+           msg = "changed to";
+           cfg_is_updated = true;
+           if (t==STG_INT1)
+               *(int8_t *)v = (int8_t) cfg_val;
+           else
+               *(uint8_t *)v = (uint8_t) cfg_val;
+       }
+       break;
+    case STG_HEX2:
+    case STG_HEX6:
+       cur_val = (t==STG_HEX2? (*(uint8_t*)v) : (*(uint32_t*)v));
+       cfg_val = cur_val;
+       if (ishexdigit(p))
+           cfg_val = strtol(p,NULL,16);
+       else
+           msg = "given value invalid, left as";
+       if (cfg_val != cur_val) {
+           msg = "changed to";
+           cfg_is_updated = true;
+           if (t==STG_HEX2)
+               *(uint8_t *)v = (uint8_t) cfg_val;
+           else
+               *(uint32_t *)v = (uint32_t) cfg_val;
+       }
+       break;
+    default:
+       if (t > STG_VOID) {
+         if (strcmp(p, (char*)v)) {
+           msg = "changed to";
+           cfg_is_updated = true;
+           strncpy(v, p, t);
+           v[t-1] = '\0';
+         }
+       }
+       break;
     }
-    if (cfg_val != cur_val) {
-        p = "changed to";
-        cfg_is_updated = true;
+    if (t==STG_INT1 || t==STG_INT1) {
+      snprintf_P(NMEABuffer, sizeof(NMEABuffer),
+        PSTR("%s %s %d\r\n"), label, msg, cfg_val);
+    } else if (t==STG_HEX2 || t==STG_HEX6) {
+      snprintf_P(NMEABuffer, sizeof(NMEABuffer),
+        PSTR("%s %s %X\r\n"), label, msg, cfg_val);
+    } else if (t > STG_VOID) {
+      snprintf_P(NMEABuffer, sizeof(NMEABuffer),
+        PSTR("%s %s %s\r\n"), label, msg, (char*)v);
     }
-    snprintf_P(NMEABuffer, sizeof(NMEABuffer),
-        PSTR("%s %s %d\r\n"), label, p, cfg_val);
     nmea_cfg_reply();   // no '*' and thus checksum will not be added
-    return cfg_val;
 }
 
 void NMEA_Process_SRF_SKV_Sentences()
@@ -1655,12 +1742,12 @@ void NMEA_Process_SRF_SKV_Sentences()
 
           snprintf_P(NMEABuffer, sizeof(NMEABuffer),
             PSTR("$PSRFC,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d*"),
-            PSRFX_VERSION,        settings->mode,     settings->rf_protocol,
-            settings->band,       settings->aircraft_type, settings->alarm,
-            settings->txpower,    settings->volume,   settings->pointer,
-            settings->nmea_g,     settings->nmea_p,   settings->nmea_l,
-            settings->nmea_s,     settings->nmea_out, settings->gdl90,
-            settings->d1090,      settings->stealth,  settings->no_track,
+            PSRFX_VERSION,      settings->mode,      settings->rf_protocol,
+            settings->band,     settings->acft_type, settings->alarm,
+            settings->txpower,  settings->volume,    settings->pointer,
+            settings->nmea_g,   settings->nmea_p,    settings->nmea_l,
+            settings->nmea_s,   settings->nmea_out,  settings->gdl90,
+            settings->d1090,    settings->stealth,   settings->no_track,
             settings->power_save );
 
           nmea_cfg_reply();
@@ -1669,26 +1756,26 @@ void NMEA_Process_SRF_SKV_Sentences()
 
           cfg_is_updated = false;
 
-          settings->mode          = updated(C_Mode, "Mode", settings->mode);
-          settings->rf_protocol   = updated(C_Protocol, "Protocol", settings->rf_protocol);
-          settings->band          = updated(C_Band, "Region", settings->band);
-          settings->aircraft_type = updated(C_AcftType, "AcftType", settings->aircraft_type);
-          settings->alarm         = updated(C_Alarm, "Alarm", settings->alarm);
-          settings->txpower       = updated(C_TxPower, "TxPower", settings->txpower);
-          settings->volume        = updated(C_Volume, "Volume", settings->volume);
-          settings->pointer       = updated(C_Pointer, "Pointer", settings->pointer);
-          settings->nmea_g        = updated(C_NMEA_gnss, "NMEA_gnss", settings->nmea_g);
-          settings->nmea_p        = updated(C_NMEA_private, "NMEA_private", settings->nmea_p);
-          settings->nmea_l        = updated(C_NMEA_legacy, "NMEA_legacy", settings->nmea_l);
-          settings->nmea_s        = updated(C_NMEA_sensors, "NMEA_sensors", settings->nmea_s);
-          settings->nmea_out      = updated(C_NMEA_Output, "NMEA_Output", settings->nmea_out);
-          settings->gdl90         = updated(C_GDL90_Output, "GDL90_Output", settings->gdl90);
-          settings->d1090         = updated(C_D1090_Output, "D1090_Output", settings->d1090);
-          settings->stealth       = updated(C_Stealth, "Stealth", settings->stealth);
-          settings->no_track      = updated(C_noTrack, "noTrack", settings->no_track);
-          settings->power_save    = updated(C_PowerSave, "PowerSave", settings->power_save);
+          tryupdate(C_Mode, STG_MODE);
+          tryupdate(C_Protocol, STG_PROTOCOL);
+          tryupdate(C_Band, STG_BAND);
+          tryupdate(C_AcftType, STG_ACFT_TYPE);
+          tryupdate(C_Alarm, STG_ALARM);
+          tryupdate(C_TxPower, STG_TXPOWER);
+          tryupdate(C_Volume, STG_VOLUME);
+          tryupdate(C_Pointer, STG_POINTER);
+          tryupdate(C_NMEA_gnss, STG_NMEA_G);
+          tryupdate(C_NMEA_private, STG_NMEA_P);
+          tryupdate(C_NMEA_legacy, STG_NMEA_L);
+          tryupdate(C_NMEA_sensors, STG_NMEA_S);
+          tryupdate(C_NMEA_Output, STG_NMEA_OUT);
+          tryupdate(C_GDL90_Output, STG_GDL90);
+          tryupdate(C_D1090_Output, STG_D1090);
+          tryupdate(C_Stealth, STG_STEALTH);
+          tryupdate(C_noTrack, STG_NO_TRACK);
+          tryupdate(C_PowerSave, STG_POWER_SAVE);
 
-          if (cfg_is_updated && atoi(C_Version.value()))
+          if (cfg_is_updated)
               nmea_cfg_restart(true);
           else
               NMEA_encode("$PSRFC,0,,,,,,,,,,,,,,,,,,*48\r\n", 31);
@@ -1703,14 +1790,14 @@ void NMEA_Process_SRF_SKV_Sentences()
           //char psrfd_buf[MAX_PSRFD_LEN];
           snprintf_P(NMEABuffer, sizeof(NMEABuffer),
             PSTR("$PSRFD,%d,%d,%06X,%06X,%06X,%d,%d,%d,%02X,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d*"),
-            PSRFX_VERSION,            settings->id_method,  settings->aircraft_id,
-            settings->ignore_id,      settings->follow_id,  settings->baud_rate,
-            settings->power_external, settings->nmea_d,     settings->debug_flags,
-            settings->nmea_out2,      settings->nmea2_g,    settings->nmea2_p,
-            settings->nmea2_l,        settings->nmea2_s,    settings->nmea2_d,
-            settings->relay,          settings->bluetooth,  settings->baudrate2,
-            settings->invert2,        settings->nmea_e,     settings->nmea2_e,
-            settings->altpin0,        settings->voice,      settings->strobe);
+            PSRFX_VERSION,         settings->id_method,  settings->aircraft_id,
+            settings->ignore_id,   settings->follow_id,  settings->baud_rate,
+            settings->power_ext,   settings->nmea_d,     settings->debug_flags,
+            settings->nmea_out2,   settings->nmea2_g,    settings->nmea2_p,
+            settings->nmea2_l,     settings->nmea2_s,    settings->nmea2_d,
+            settings->relay,       settings->bluetooth,  settings->baudrate2,
+            settings->invert2,     settings->nmea_e,     settings->nmea2_e,
+            settings->altpin0,     settings->voice,      settings->strobe);
 
           nmea_cfg_reply();
 
@@ -1718,59 +1805,37 @@ void NMEA_Process_SRF_SKV_Sentences()
 
           cfg_is_updated = false;
 
-          settings->baud_rate      = updated(D_baud_rate, "Baud rate", settings->baud_rate);
-          settings->power_external = updated(D_power_ext, "Power source", settings->power_external);
-          settings->nmea_d         = updated(D_NMEA_debug, "NMEA_debug", settings->nmea_d);
-          settings->debug_flags    = updated(D_debug_flags, "Debug flags", settings->debug_flags);
-          settings->nmea_out2      = updated(D_NMEA2, "NMEA_Output2", settings->nmea_out2);
+          tryupdate(D_baud_rate, STG_BAUD_RATE);
+          tryupdate(D_power_ext, STG_POWER_EXT);
+          tryupdate(D_NMEA_debug, STG_NMEA_D);
+          tryupdate(D_debug_flags, STG_DEBUG_FLAGS);
+          tryupdate(D_NMEA2, STG_NMEA_OUT2);
           if (settings->nmea_out2 == settings->nmea_out)
               settings->nmea_out2 = DEST_NONE;
-          settings->nmea_g         = updated(D_NMEA2_gnss, "NMEA2_gnss", settings->nmea_g);
-          settings->nmea_p         = updated(D_NMEA2_private, "NMEA2_private", settings->nmea_p);
-          settings->nmea_l         = updated(D_NMEA2_legacy, "NMEA2_legacy", settings->nmea_l);
-          settings->nmea_s         = updated(D_NMEA2_sensors, "NMEA2_sensors", settings->nmea_s);
-          settings->nmea_d         = updated(D_NMEA2_debug, "NMEA2_debug", settings->nmea_d);
-          settings->relay          = updated(D_relay, "Relay", settings->relay);
-          settings->bluetooth      = updated(D_bluetooth, "Bluetooth", settings->bluetooth);
+          tryupdate(D_NMEA2_gnss, STG_NMEA_G);
+          tryupdate(D_NMEA2_private, STG_NMEA_P);
+          tryupdate(D_NMEA2_legacy, STG_NMEA_L);
+          tryupdate(D_NMEA2_sensors, STG_NMEA_S);
+          tryupdate(D_NMEA2_debug, STG_NMEA_D);
+          tryupdate(D_relay, STG_RELAY);
+          tryupdate(D_bluetooth, STG_BLUETOOTH);
 #if defined(ESP32)
-          settings->baudrate2      = updated(D_baudrate2, "Baud rate 2", settings->baudrate2);
-          settings->invert2        = updated(D_invert2, "Serial2 logic", settings->invert2);
+          tryupdate(D_baudrate2, STG_BAUDRATE2);
+          tryupdate(D_invert2, STG_INVERT2);
 #endif
-          settings->nmea_e         = updated(D_extern1, "NMEA1_ext", settings->nmea_e);
-          settings->nmea2_e        = updated(D_extern2, "NMEA2_ext", settings->nmea2_e);
+          tryupdate(D_extern1, STG_NMEA_E);
+          tryupdate(D_extern2, STG_NMEA2_E);
 #if defined(ESP32)
-          settings->altpin0        = updated(D_altpin0, "Use alt RX pin", settings->altpin0);
+          tryupdate(D_altpin0, STG_ALTPIN0);
 #endif
-          settings->voice          = updated(D_voice, "Voice", settings->voice);
-          settings->strobe         = updated(D_strobe, "Strobe", settings->strobe);
+          tryupdate(D_voice, STG_VOICE);
+          tryupdate(D_strobe, STG_STROBE);
+          tryupdate(D_id_method, STG_ID_METHOD);
+          tryupdate(D_aircraft_id, STG_AIRCRAFT_ID);
+          tryupdate(D_ignore_id, STG_IGNORE_ID);
+          tryupdate(D_follow_id, STG_FOLLOW_ID);
 
-          settings->id_method      = updated(D_id_method, "ID method", settings->id_method);
-          if (ishexdigit(D_aircraft_id.value())) {
-              uint32_t val = strtoul(D_aircraft_id.value(), NULL, 16);
-              if (val != settings->aircraft_id) {
-                 settings->aircraft_id = val;
-                 cfg_is_updated = true;
-              }
-              Serial.print(F("Aircraft ID = ")); Serial.println(settings->aircraft_id, HEX);
-          }
-          if (ishexdigit(D_ignore_id.value())) {
-              uint32_t val = strtoul(D_ignore_id.value(), NULL, 16);
-              if (val != settings->ignore_id) {
-                settings->ignore_id = val;
-                cfg_is_updated = true;
-              }
-              Serial.print(F("Ignore ID = ")); Serial.println(settings->ignore_id, HEX);
-          }
-          if (ishexdigit(D_follow_id.value())) {
-              uint32_t val = strtoul(D_follow_id.value(), NULL, 16);
-              if (val != settings->follow_id) {
-                settings->follow_id = val;
-                cfg_is_updated = true;
-              }
-              Serial.print(F("Follow ID = ")); Serial.println(settings->follow_id, HEX);
-          }
-
-          if (cfg_is_updated && atoi(D_Version.value()))
+          if (cfg_is_updated)
               nmea_cfg_restart(true);
           else
               NMEA_encode("$PSRFD,0,,,,,,,,,,,,,,,,,,,,,,,*47\r\n", 36);
@@ -1783,18 +1848,41 @@ void NMEA_Process_SRF_SKV_Sentences()
         //char psrff_buf[MAX_PSRFF_LEN];
         snprintf_P(NMEABuffer, sizeof(NMEABuffer),
           PSTR("$PSRFF,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d*"),
-          PSRFX_VERSION,         settings->rx1090,    settings->mode_s,
-          settings->gdl90_in,    settings->gnss_pins, settings->ppswire,
-          settings->logalarms,   settings->sd_card,   settings->logflight,
-          settings->loginterval, settings->alt_udp,   settings->tcpport,
-          settings->tcpmode,     geoid_from_setting,  settings->freq_corr);
+          PSRFX_VERSION,         settings->rx1090,      settings->rx1090x,
+          settings->mode_s,      settings->gdl90_in,    settings->gnss_pins,
+          settings->ppswire,     settings->logalarms,   settings->sd_card,
+          settings->logflight,   settings->loginterval, settings->alt_udp,
+          settings->tcpmode,     settings->tcpport,     settings->geoid,
+          settings->freq_corr);
         nmea_cfg_reply();
-      }
 
-      // at this point PSRFF is output-only as above
-      // if changed to allow settings, note that:
-      //     geoid_from_setting = descale(settings->geoid, 5, 1, 1) - 10;
-      //     settings->geoid = enscale(geoid_from_setting+10, 5, 1, 1);
+      } else if (isdecdigit(F_Version.value())) {
+
+          cfg_is_updated = false;
+
+          tryupdate(F_gdl90_in, STG_GDL90_IN);
+          tryupdate(F_alt_udp, STG_ALT_UDP);
+          tryupdate(F_tcpmode, STG_TCPMODE);
+          tryupdate(F_tcpport, STG_TCPPORT);
+          tryupdate(F_geoid, STG_GEOID);
+          tryupdate(F_freq_corr, STG_RFC);
+#if defined(ESP32)
+          tryupdate(F_rx1090, STG_RX1090);
+          tryupdate(F_rx1090x, STG_RX1090X);
+          tryupdate(F_mode_s, STG_MODE_S);
+          tryupdate(F_gnss_pins, STG_GNSS_PINS);
+          tryupdate(F_ppswire, STG_PPSWIRE);
+          tryupdate(F_logalarms, STG_ALARMLOG);
+          tryupdate(F_sd_card, STG_SD_CARD);
+          tryupdate(F_logflight, STG_LOGFLIGHT);
+          tryupdate(F_loginterval, STG_LOGINTERVAL);
+#endif
+
+          if (cfg_is_updated)
+              nmea_cfg_restart(true);
+          else
+              NMEA_encode("$PSRFF,0,,,,,,,,,,,,,,,*61\r\n", 28);
+      }
   }
 
   // $PSRFT,0*5F  or  $PSRFT,1*5E  to set test_mode to 0 or 1, or $PSRFT,?*50 to query
@@ -1899,40 +1987,24 @@ void NMEA_Process_SRF_SKV_Sentences()
 
           cfg_is_updated = false;
 
-          ui->adapter     = updated(V_Adapter, "Adapter", ui->adapter);
-          ui->connection  = updated(V_Connection, "Connection", ui->connection);
-          ui->units       = updated(V_Units, "Units", ui->units);
-          ui->zoom        = updated(V_Zoom, "Zoom", ui->zoom);
-          ui->protocol    = updated(V_Protocol, "Protocol", ui->protocol);
-          ui->baudrate    = updated(V_Baudrate, "Baudrate", ui->baudrate);
-          if (V_Server.value()[0]) {
-              strncpy(ui->server, V_Server.value(), sizeof(ui->server));
-              Serial.print(F("Server = ")); Serial.println(ui->server);
-              cfg_is_updated = true;
-          }
-          if (V_Key.value()[0]) {
-              strncpy(ui->key, V_Key.value(), sizeof(ui->key));
-              Serial.print(F("Key = ")); Serial.println(ui->key);
-              cfg_is_updated = true;
-          }
-          ui->rotate      = updated(V_Rotate, "Rotation", ui->rotate);
-          ui->orientation = updated(V_Orientation, "Orientation", ui->orientation);
-          ui->adb         = updated(V_AvDB, "AvDB", ui->adb);
-          ui->idpref      = updated(V_ID_Pref, "ID_Pref", ui->idpref);
-          ui->vmode       = updated(V_VMode, "VMode", ui->vmode);
-          ui->voice       = updated(V_Voice, "Voice", ui->voice);
-          ui->aghost      = updated(V_AntiGhost, "AntiGhost", ui->aghost);
-          ui->filter      = updated(V_Filter, "Filter", ui->filter);
-          ui->power_save  = updated(V_PowerSave, "PowerSave", ui->power_save);
-
-          if (ishexdigit(V_Team.value())) {
-              uint32_t val = strtoul(V_Team.value(), NULL, 16);
-              if (val != ui->team) {
-                ui->team = val;
-                cfg_is_updated = true;
-              }
-              Serial.print(F("Team = ")); Serial.println(ui->team, HEX);
-          }
+          tryupdate(V_Adapter, UI_ADAPTER);
+          tryupdate(V_Connection, UI_CONNECTION);
+          tryupdate(V_Units, UI_UNITS);
+          tryupdate(V_Zoom, UI_ZOOM);
+          tryupdate(V_Protocol, UI_PROTOCOL);
+          tryupdate(V_Baudrate, UI_BAUD);
+          tryupdate(V_Server, UI_SERVER);
+          tryupdate(V_Key, UI_KEY);
+          tryupdate(V_Rotate, UI_ROTATE);
+          tryupdate(V_Orientation, UI_ORIENTATION);
+          tryupdate(V_AvDB, UI_ADB);
+          tryupdate(V_ID_Pref, UI_IDPREF);
+          tryupdate(V_VMode, UI_VMODE);
+          tryupdate(V_Voice, UI_VOICE);
+          tryupdate(V_AntiGhost, UI_AGHOST);
+          tryupdate(V_Filter, UI_FILTER);
+          tryupdate(V_PowerSave, UI_POWER_SAVE);
+          tryupdate(V_Team, UI_TEAM);
 
           if (cfg_is_updated && atoi(V_Version.value()))
               nmea_cfg_restart(true);

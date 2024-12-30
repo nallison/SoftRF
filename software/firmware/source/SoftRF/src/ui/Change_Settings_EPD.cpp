@@ -220,7 +220,7 @@ void get_settings()
 {
     if (chgconf_initialized)
         return;
-    actype    = get_one_setting((int) settings->aircraft_type, actypes);
+    actype    = get_one_setting((int) settings->acft_type, actypes);
     protocol  = get_one_setting((int) settings->rf_protocol, protocols);
     region    = get_one_setting((int) settings->band, regions);
     alarm     = get_one_setting((int) settings->alarm, alarms);
@@ -243,12 +243,12 @@ void get_settings()
 
 void EPD_chgconf_save()
 {
-    settings->aircraft_type = actypes[actype].code;
-    settings->rf_protocol   = protocols[protocol].code;
-    settings->band          = regions[region].code;
-    settings->alarm         = alarms[alarm].code;
-    settings->relay         = relays[relay].code;
-    settings->id_method     = idtypes[idtype].code;
+    settings->acft_type   = actypes[actype].code;
+    settings->rf_protocol = protocols[protocol].code;
+    settings->band        = regions[region].code;
+    settings->alarm       = alarms[alarm].code;
+    settings->relay       = relays[relay].code;
+    settings->id_method   = idtypes[idtype].code;
     uint32_t id = id6;
     id |= (id5 << 4);
     id |= (id4 << 8);

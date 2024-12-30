@@ -69,7 +69,7 @@ static bool had_ext_power = false;
 static bool follow_ext_power_shutoff(float voltage)
 {
 #if defined(ESP32)
-    if (! settings->power_external)
+    if (! settings->power_ext)
         return false;
     if (hw_info.model != SOFTRF_MODEL_PRIME_MK2)
         return false;
@@ -87,7 +87,7 @@ static bool follow_ext_power_shutoff(float voltage)
         return false;
     return true;
 #elif defined(ARDUINO_ARCH_NRF52)
-    if (! settings->power_external)
+    if (! settings->power_ext)
         return false;
     if (hw_info.model != SOFTRF_MODEL_BADGE)
         return false;

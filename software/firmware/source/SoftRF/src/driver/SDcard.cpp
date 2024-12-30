@@ -46,7 +46,7 @@ SPIClass SD_HSPI = SPIClass(HSPI);  // for a separate SPI bus for the SD card
 static uint8_t ss_pin;
 static uint8_t cardType = CARD_NONE;
 static File SDfile;
-static bool SDfileOpen = false;
+bool SDfileOpen = false;
 File SIMfile;
 File TARGETfile;
 bool SIMfileOpen = false;

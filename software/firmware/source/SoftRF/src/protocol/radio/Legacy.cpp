@@ -31,6 +31,8 @@
 #include "../../system/Time.h"
 #include "../../driver/RF.h"
 #include "../../driver/EEPROM.h"
+#include "../../driver/SDcard.h"
+#include "../data/IGC.h"
 #include "../data/NMEA.h"
 
 const rf_proto_desc_t legacy_proto_desc = {
@@ -486,6 +488,19 @@ bool legacy_decode(void *buffer, container_t *this_aircraft, ufo_t *fop) {
         Serial.println("skipping packet msg_type != 0");
         return false;
     }
+
+#if 1
+    if (! fop->relayed) {
+        //Serial.print("received V6 packet from ID ");
+        //Serial.println(fop->addr,HEX);
+        snprintf_P(NMEABuffer, sizeof(NMEABuffer), PSTR("$PSRF6,%06X\r\n"), fop->addr);
+        Serial.print(NMEABuffer);
+        NMEAOutD();
+#if defined(USE_SD_CARD)
+        FlightLogComment(NMEABuffer+2);   // it will prepend LPLT
+#endif
+    }
+#endif
 
     // decrypt and decode old legacy protocol:
 

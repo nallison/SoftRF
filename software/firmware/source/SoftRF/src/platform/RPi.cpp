@@ -984,7 +984,7 @@ int main()
 #endif /* USE_EPAPER */
 
   ThisAircraft.addr = SoC->getChipId() & 0x00FFFFFF;
-  ThisAircraft.aircraft_type = settings->aircraft_type;
+  ThisAircraft.aircraft_type = settings->acft_type;
   ThisAircraft.protocol = settings->rf_protocol;
   ThisAircraft.stealth  = settings->stealth;
   ThisAircraft.no_track = settings->no_track;

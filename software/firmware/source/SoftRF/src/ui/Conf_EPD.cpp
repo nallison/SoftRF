@@ -76,7 +76,7 @@ NMEA2: USB LD
 
       snprintf(info_line, sizeof(info_line), "%s  %s  %s",
           (settings->mode == SOFTRF_MODE_NORMAL ? "Normal" : "Other"),
-          Aircraft_Type[settings->aircraft_type],
+          Aircraft_Type[settings->acft_type],
           settings->relay==RELAY_LANDED? "_" : (settings->relay==RELAY_ALL? "=" : " "));
       display->getTextBounds(info_line, 0, 0, &tbx, &tby, &tbw, &tbh);
       y += tbh;

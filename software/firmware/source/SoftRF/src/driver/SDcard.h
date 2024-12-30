@@ -32,6 +32,7 @@ void SD_setup();
 void SD_log(const char * message);
 void closeSDlog();
 
+extern bool SDfileOpen;
 extern File SIMfile;
 extern File TARGETfile;
 extern bool SIMfileOpen;

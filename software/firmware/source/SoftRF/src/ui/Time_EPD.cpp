@@ -24,6 +24,7 @@
 
 #include "../driver/EPD.h"
 #include "../driver/Battery.h"
+#include "../TrafficHelper.h"
 
 #if defined(ARDUINO_ARCH_NRF52)
 #include <pcf8563.h>
@@ -60,7 +61,7 @@ void EPD_time_setup()
 
 void EPD_time_loop()
 {
-  char buf_hm[8];
+  char buf_hm[16];
   char buf_sec[4];
 
   int16_t  tbx, tby;
@@ -114,14 +115,22 @@ void EPD_time_loop()
     display->setFont(&FreeMonoBold24pt7b);
     display->getTextBounds(buf_hm, 0, 0, &tbx, &tby, &tbw, &tbh);
 
-    display->setCursor((display->width() - tbw) / 2, display->height() / 2);
+    display->setCursor((display->width() - tbw) / 2, display->height() / 2 - 10);
     display->print(buf_hm);
 
     display->setFont(&FreeMono18pt7b);
     display->getTextBounds(buf_sec, 0, 0, &tbx, &tby, &tbw, &tbh);
 
-    display->setCursor((display->width() - tbw) / 2, display->height() / 2 + tbh + tbh);
+    display->setCursor((display->width() - tbw) / 2, display->height() / 2 + tbh + tbh - 20);
     display->print(buf_sec);
+
+    // show the latest max RSSI
+    int acrfts_counter = Traffic_Count();   // maxrssi is a byproduct
+    snprintf(buf_hm,  sizeof(buf_hm),  "max RSSI %d", maxrssi);
+    display->setFont(&FreeMonoBold12pt7b);
+    display->getTextBounds(buf_hm, 0, 0, &tbx, &tby, &tbw, &tbh);
+    display->setCursor((display->width() - tbw) / 2, display->height() - 20);
+    display->print(buf_hm);
 
 #if defined(USE_EPD_TASK)
     /* a signal to background EPD update task */

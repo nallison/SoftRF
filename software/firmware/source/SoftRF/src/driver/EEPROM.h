@@ -45,6 +45,7 @@
 
 #define SOFTRF_EEPROM_MAGIC   0xBABADEDA
 #define SOFTRF_EEPROM_VERSION 0xACAC0B0D
+#define SOFTRF_SETTINGS_VERSION 1
 
 enum
 {
@@ -149,14 +150,97 @@ enum
 	LOG_INTERVAL_8S = 3
 };
 
-typedef struct __attribute__((packed)) Settings {
+enum stgidx {
+    STG_NONE,
+    STG_VERSION,
+    STG_MODE,
+    STG_PROTOCOL,
+    STG_BAND,
+    STG_ACFT_TYPE,
+    STG_ID_METHOD,
+    STG_AIRCRAFT_ID,
+    STG_IGNORE_ID,
+    STG_FOLLOW_ID,
+    STG_ALARM,
+    STG_TXPOWER,
+    STG_VOLUME,
+    STG_STROBE,
+    STG_POINTER,
+    STG_VOICE,
+    STG_BLUETOOTH,
+    STG_OWNSSID,
+    STG_EXTSSID,
+    STG_PSK,
+    STG_HOST_IP,
+    STG_TCPMODE,
+    STG_TCPPORT,
+    STG_NMEA_OUT,
+    STG_NMEA_G,
+    STG_NMEA_P,
+    STG_NMEA_L,
+    STG_NMEA_S,
+    STG_NMEA_D,
+    STG_NMEA_E,
+    STG_NMEA_OUT2,
+    STG_NMEA2_G,
+    STG_NMEA2_P,
+    STG_NMEA2_L,
+    STG_NMEA2_S,
+    STG_NMEA2_D,
+    STG_NMEA2_E,
+    STG_BAUD_RATE,
+    STG_ALTPIN0,
+    STG_BAUDRATE2,
+    STG_INVERT2,
+    STG_ALT_UDP,
+    STG_RX1090,
+    STG_RX1090X,
+    STG_MODE_S,
+    STG_GDL90_IN,
+    STG_GDL90,
+    STG_D1090,
+    STG_RELAY,
+    STG_STEALTH,
+    STG_NO_TRACK,
+    STG_POWER_SAVE,
+    STG_POWER_EXT,
+    STG_RFC,
+    STG_ALARMLOG,
+    STG_GNSS_PINS,
+    STG_PPSWIRE,
+    STG_SD_CARD,
+    STG_LOGFLIGHT,
+    STG_LOGINTERVAL,
+    STG_GEOID,
+    STG_JSON,
+    STG_DEBUG_FLAGS,
+// >>> for nRF52 also need UI settings
+    STG_END
+};
+
+enum stgtyp {
+    STG_HEX6  = -4,
+    STG_HEX2  = -3,
+    STG_UINT1 = -2,
+    STG_INT1  = -1,
+    STG_VOID  = 0,
+    STG_STR    // strings are coded using their length
+};
+
+struct setting_struct {
+    const char *label;
+    char *value;
+    int8_t type;
+};
+
+typedef struct __attribute__((packed)) PackedSettings {
 
     uint8_t  mode:4;            // do not move
     uint8_t  rf_protocol:4;     // do not move
     uint8_t  band:4;            // do not move
     uint8_t  txpower:2;         // do not move
     uint8_t  volume:2;
-    uint8_t  aircraft_type;     // can be reduced to 5 bits (not 4!)
+    uint8_t  acft_type;         // can be reduced to 5 bits (not 4!)
 
     uint8_t  geoid:7;
     bool     resvd1:1;
@@ -180,7 +264,7 @@ typedef struct __attribute__((packed)) Settings {
 
     uint8_t  pointer:2;
     uint8_t  power_save:2;
-    uint8_t  power_external:1;  /* if nonzero, shuts down if battery is not full */
+    uint8_t  power_ext:1;    /* if nonzero, shuts down if battery is not full */
     uint8_t  rx1090:2;       // attached ADS-B receiver module    // do not move
     bool     mode_s:1;
 
@@ -200,7 +284,7 @@ typedef struct __attribute__((packed)) Settings {
     bool     invert2:1;     // whether to invert the logic levels on UART2
     bool     altpin0:1;     // whether to use a different pin for UART0 RX
 
-    /* Use a key provided by (local) gliding contest organizer */
+    /* encryption key provided by gliding contest organizer */
     uint32_t igc_key[4];
 
     /* added to allow setting aircraft ID and also an ID to ignore */
@@ -227,12 +311,93 @@ typedef struct __attribute__((packed)) Settings {
     char    psk[17];
     char    host_ip[16];
 
+} settingb_t;
+
+typedef struct Settings {
+
+    uint8_t  version;
+    uint8_t  mode;
+    uint8_t  rf_protocol;
+    uint8_t  band;
+    uint8_t  txpower;
+    uint8_t  volume;
+    uint8_t  acft_type;
+
+    int8_t   geoid;
+
+    bool     nmea_g;
+    bool     nmea_p;
+    bool     nmea_l;
+    bool     nmea_s;
+    bool     nmea_d;
+    uint8_t  nmea_out;
+
+    uint8_t  bluetooth;
+    uint8_t  alarm;
+    bool     stealth;
+    bool     no_track;
+
+    uint8_t  gdl90;      // output destination
+    uint8_t  d1090;
+    uint8_t  json;
+
+    uint8_t  pointer;
+    uint8_t  power_save;
+    uint8_t  power_ext;  /* if nonzero, shuts down if battery is not full */
+    uint8_t  rx1090;
+    uint8_t  rx1090x;    // settings for the ADS-B receiver module
+    bool     mode_s;
+
+    uint8_t  gnss_pins;
+    uint8_t  sd_card;      // gpio pins for SD card adapter
+    uint8_t  logflight;
+    uint8_t  loginterval;
+
+    int8_t   freq_corr; /* +/-, kHz */   // <<< limited to +-30, so can liberate two bits
+    uint8_t  relay;
+    uint8_t  gdl90_in;    // data from this port will be interpreted as GDL90
+    uint8_t  alt_udp;     // if 1 then use 10111 instead of 10110
+    bool     nmea_e;
+    bool     nmea2_e;     // whether to send bridged data
+    uint8_t  baud_rate;
+    uint8_t  baudrate2;
+    bool     invert2;     // whether to invert the logic levels on UART2
+    bool     altpin0;     // whether to use a different pin for UART0 RX
+
+    /* encryption key provided by gliding contest organizer */
+    uint32_t igc_key[4];
+
+    /* added to allow setting aircraft ID and also an ID to ignore */
+    uint32_t aircraft_id;
+    uint8_t  id_method;
+    uint8_t  debug_flags;   /* each bit activates output of some debug info */
+    uint32_t ignore_id;
+    uint8_t  strobe;
+    bool    logalarms;
+    uint8_t  voice;
+    uint8_t  tcpport;
+    uint8_t  tcpmode;
+    bool     ppswire;
+    uint32_t follow_id;
+
+    bool     nmea2_g;
+    bool     nmea2_p;
+    bool     nmea2_l;
+    bool     nmea2_s;
+    bool     nmea2_d;
+    uint8_t  nmea_out2;
+
+    char    myssid[20];    // if using AP mode
+    char    ssid[20];      // if connecting to external network
+    char    psk[20];
+    char    host_ip[16];
+
 } settings_t;
 
 typedef struct EEPROM_S {
     uint32_t  magic;
     uint32_t  version;
-    settings_t settings;
+    settingb_t settings;
     uint32_t  version2;    // guard from both ends
 } eeprom_struct_t;
 
@@ -251,11 +416,21 @@ typedef union EEPROM_U {
 void EEPROM_setup(void);
 void EEPROM_defaults(void);
 void EEPROM_store(void);
+bool try_match_setting(const char *label, const char *value, const int index);
 void show_settings_serial(void);
+void save_settings_to_file(void);
+bool load_settings_from_file(void);
 void do_test_mode(void);
 
-extern bool default_settings_used;
+enum stg_default {
+    STG_DEFAULT = 0,
+    STG_EEPROM  = 1,
+    STG_FILE    = 2
+};
+extern uint8_t default_settings_used;
+
 extern settings_t *settings;
+extern setting_struct stgdesc[STG_END];
 extern uint32_t baudrates[];
 extern bool do_alarm_demo;
 extern bool test_mode;
