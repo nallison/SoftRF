@@ -18,25 +18,37 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <SD.h>
-
-#include "MD5.h"
-
 // include this first, to get USE_SD_CARD
 #include "../../system/SoC.h"
 
+#if defined(ESP32)
 #if defined(USE_SD_CARD)
+#include <SD.h>
+#endif
+//#define SD_BASEPATH "/logs/"
+//#define BASEPATH ""    // in PSRAM, no "path"
 
-#include "../../driver/EEPROM.h"
+#elif defined(ARDUINO_ARCH_NRF52)
+// write IGC file to the FAT file system in the main flash
+//#define BASEPATH "/"
+
+#endif
+
+#include "MD5.h"
+
+#include "../../driver/Settings.h"
 #include "../../driver/GNSS.h"
 #include "../../driver/Baro.h"
-#include "../../driver/SDcard.h"
+#include "../../driver/Filesys.h"
 #include "NMEA.h"
 #include "IGC.h"
 
-#define INI_FILE              "/logs/IGC_CONF.TXT"
+char *PSRAMbuf = NULL;
+size_t PSRAMbufSize = 0;
+size_t PSRAMbufUsed = 0;
 
 char FlightLogPath[28] = {'\0'};
+const char *FlightLogFilename;    // without the folder name
 File FlightLog;
 bool FlightLogOpen = false;   // means log is in process, but the *file* may be closed
 bool FlightLogFail = false;
@@ -51,40 +63,70 @@ static char brecord_template[] = "B1751494352910N07215306WA%05d%05d\r\n";
 #define PRE_POS_NUM   8    // number of pre-stored B-records
 //#define G_RECORD_SIZE (8 * (1+16+2))   // G+16+\r\n
 #define DATA_BLOCK_SIZE 3000
-static char *data_block_buf = NULL;    // will be malloc()ed into PSRAM
+#if defined(ESP32)
+static char data_block_buf[DATA_BLOCK_SIZE + B_RECORD_SIZE*PRE_POS_NUM];
+       // malloc()ed would be in PSRAM, slowing MD5 updates?
+#else
+static char *data_block_buf = NULL;   // will malloc() it later
+#endif
 static int data_block_used = 0;
 static char *pre_positions_buf = NULL;
 static int num_pre_positions = 0;
 static int pre_positions_head = 0;
 static int pre_positions_next = 0;
 
-// default config
-static const char* CONFIG_DEFAULT_PILOT = "Chuck Yeager";
-static const char* CONFIG_DEFAULT_TYPE  = "ASW20";
-static const char* CONFIG_DEFAULT_REG   = "N12345";
-static const char* CONFIG_DEFAULT_CS    = "XXX";
-
-static MD5_CTX md5_buf[8];   // or could malloc() it in PSRAM?
+#if defined(ESP32)
+static MD5_CTX md5_buf[8];   // do not malloc() since PSRAM access is slow for this
+#else
+static MD5_CTX *md5_buf = NULL;   // will malloc() it later
+#endif
 static MD5_CTX *md5_a, *md5_b, *md5_c, *md5_d;
 static MD5_CTX *md5_a_copy, *md5_b_copy, *md5_c_copy, *md5_d_copy;
 
 void FlightLog_setup()
 {
-    if (FlightLogFail)
-        return;
+#if defined(ESP32)
+    if (hw_info.model == SOFTRF_MODEL_PRIME_MK2) {
+        if (SD_is_mounted == false) {
+            // log to PSRAM instead
+            // get a big 3.5MB buffer - or at least 1MB
+            // - transparent PSRAM access is limited to 4MB total
+            size_t size = 3500000;
+            while (size >= 1000000) {
+                PSRAMbuf = (char *) malloc(size);
+                if (PSRAMbuf)
+                    break;
+                size -= 500000;
+            }
+            if (! PSRAMbuf) {
+                FlightLogFail = true;
+                Serial.println("Failed to allocate PSRAM for IGC");
+                return;
+            } else {
+                PSRAMbufSize = size;
+                Serial.print("IGC PSRAMbufSize=");
+                Serial.println(PSRAMbufSize);
+            }
+        }
+    }
+#else   // not ESP32
     data_block_buf = (char *) malloc(DATA_BLOCK_SIZE + B_RECORD_SIZE*PRE_POS_NUM);
-    // the combined block is intended to be stored in PSRAM if possible
     if (! data_block_buf) {
         FlightLogFail = true;
+        Serial.println("Failed to allocate data_block_buf");
         return;
     }
-    pre_positions_buf = data_block_buf + DATA_BLOCK_SIZE;
-    //MD5_CTX *p = (MD5_CTX *) malloc(8*sizeof(MD5_CTX));
-    //if (! data_block_buf) {
-    //    free(data_block_buf);
-    //    FlightLogFail = true;
-    //    return;
-    //}
+    md5_buf = (MD5_CTX *) malloc(8*sizeof(MD5_CTX));   // about 1500 bytes total
+    if (! md5_buf) {
+        FlightLogFail = true;
+        Serial.println("Failed to allocate MD5_buf");
+        return;
+    }
+#endif
+
+    //Serial.printf("flightlog data_block size: %d\r\n", DATA_BLOCK_SIZE + B_RECORD_SIZE*PRE_POS_NUM);
+    pre_positions_buf = &data_block_buf[DATA_BLOCK_SIZE];
+
     MD5_CTX *p = md5_buf;
     md5_a = p++;
     md5_b = p++;
@@ -110,7 +152,8 @@ char clean_igc_char(char c)
 
 void failFlightLog()
 {
-    FlightLog.close();
+    if (! PSRAMbuf)
+        FlightLog.close();
     FlightLogOpen = false;
     FlightLogFail = true;
 }
@@ -123,8 +166,6 @@ void write_g_record(MD5_CTX *md5)
     //    return;
     MD5::MD5Final(md5);
     char *digest = MD5::make_digest(md5);
-//Serial.print("md5_digest=");
-//Serial.println(md5->digest);
     if (strlen(digest) == 32) {
       char buf[40];
       buf[0] = 'G';
@@ -132,20 +173,31 @@ void write_g_record(MD5_CTX *md5)
       strcpy(&buf[17], "\r\nG");
       strncpy(&buf[20], digest+16, 16);
       strcpy(&buf[36], "\r\n");
-      if (FlightLog.print(buf) == 0)
-          failFlightLog();
+      if (PSRAMbuf) {
+          memcpy(PSRAMbuf+PSRAMbufUsed, buf, 38);   // 1 + 16 + 2 + 1 + 16 + 2 = 38
+          PSRAMbufUsed += 38;
+      } else {
+          if (FlightLog.print(buf) == 0)
+              failFlightLog();
+      }
     }
 }
 
 void reopenFlightLog()
 {
+    if (PSRAMbuf)           // nothing needs to be re-opened
+        return;
     if (FlightLogFail)
         return;
     if (! FlightLogOpen)    // no log file in process
         return;
+    if (IGCFS_free_kb() < 50) {   // space almost full
+        failFlightLog();
+        return;
+    }
     if (!FlightLogPath[0])  // file name has not been generated
         return;
-    FlightLog = SD.open(FlightLogPath, FILE_WRITE);
+    FlightLog = IGCFILESYS.open(FlightLogPath, FILE_WRITE);
     if (!FlightLog) {
         Serial.println("Failed to re-open flight log for writing");
         FlightLogFail = true;
@@ -163,27 +215,34 @@ void closeFlightLog()
 {
     if (! FlightLogOpen)    // no log file in process
         return;
-    if (!FlightLogFail)
+    if (! FlightLogFail)
         reopenFlightLog();
     if (FlightLogFail)
         return;
-    if (data_block_used > 0) {
-        if (FlightLog.write((const uint8_t*) data_block_buf, data_block_used) < data_block_used) {
-            failFlightLog();
-            return;
-        }
+    if (PSRAMbuf) {
+        completeFlightLog();     // can still be extended
+    } else {
+       if (data_block_used > 0) {  // otherwise it's already complete
+         if (FlightLog.write((const uint8_t*) data_block_buf, data_block_used) < data_block_used) {
+             FlightLogFail = true;
+         } else {
+             //data_block_used = 0;
+             //FlightLogPosition = 0;
+             write_g_record(md5_a);
+             write_g_record(md5_b);
+             write_g_record(md5_c);
+             write_g_record(md5_d);
+         }
+       }
+       FlightLog.close();
     }
-    //data_block_used = 0;
-    //FlightLogPosition = 0;
-    write_g_record(md5_a);
-    write_g_record(md5_b);
-    write_g_record(md5_c);
-    write_g_record(md5_d);
-    FlightLog.close();
     FlightLogOpen = false;
     FlightLogClosed = millis();
     //FlightLogPath[0] = '\0';   // leave intact for Web.cpp/flightlogfile()
-    Serial.println("Flight log closed");
+    if (FlightLogFail)
+        Serial.println("Error closing flight log");
+    else if (! PSRAMbuf)
+        Serial.println("Flight log closed OK");
 }
 
 void MD5_update(const char *data, size_t size)
@@ -197,15 +256,26 @@ void MD5_update(const char *data, size_t size)
 // common code to the functions below
 void igc_file_append(const char *data, size_t size)
 {
-    if (data_block_used + size > DATA_BLOCK_SIZE) {
+    if ((data_block_used && data==NULL) || (data_block_used + size > DATA_BLOCK_SIZE)) {
         // flush the block before writing the new data
-        if (!FlightLogFail)
+        if (! FlightLogFail)
             reopenFlightLog();
         if (FlightLogFail)
             return;
-        if (FlightLog.write((const uint8_t*) data_block_buf, data_block_used) < data_block_used) {
-            failFlightLog();
-            return;
+        if (PSRAMbuf) {
+          if (FlightLogPosition + data_block_used + 4*38 + 1 > PSRAMbufSize) {
+              // if not enough PSRAM buffer space to write the cache, then stop here
+              // - the file is complete from the previous flush
+              failFlightLog();
+              return;
+          }
+          memcpy(PSRAMbuf+FlightLogPosition, data_block_buf, data_block_used);
+          PSRAMbufUsed = FlightLogPosition + data_block_used;  // before the G-record
+        } else {
+          if (FlightLog.write((const uint8_t*) data_block_buf, data_block_used) < data_block_used) {
+              failFlightLog();
+              return;
+          }
         }
         FlightLogPosition += data_block_used;  // file position before the G-record
         data_block_used = 0;
@@ -216,19 +286,32 @@ void igc_file_append(const char *data, size_t size)
         *md5_b_copy = *md5_b;
         *md5_c_copy = *md5_c;
         *md5_d_copy = *md5_d;
-        write_g_record(md5_a_copy);
+        write_g_record(md5_a_copy);    // increments PSRAMbufUsed
         write_g_record(md5_b_copy);
         write_g_record(md5_c_copy);
         write_g_record(md5_d_copy);
-        FlightLog.close();
+        if (! PSRAMbuf)
+            FlightLog.close();
         Serial.print("Flight log updated, size now: ");
         Serial.println(FlightLogPosition);
+        //if (PSRAMbuf) {
+        //Serial.print("PSRAMbufUsed: ");
+        //Serial.println(PSRAMbufUsed);
+        //}
         yield();
     }
-    strncpy(data_block_buf + data_block_used, data, size);
+    if (data==NULL || size==0)
+        return;
+    memcpy(&data_block_buf[data_block_used], data, size);
     data_block_used += size;
     //Serial.print("data_block_used = ");
     //Serial.println(data_block_used);
+}
+
+void completeFlightLog()
+{
+    igc_file_append(NULL,0);  // flush cache & append G-record
+    Serial.println("Flight log complete");
 }
 
 // assume chars are IGC valid, input must be const
@@ -296,7 +379,6 @@ void igc_file_append_comment(char *data)
     igc_file_append_nonconst(data, true, true);
 }
 
-
 /*
 Short file name style: YMDCXXXF.IGC
 Y = Year; value 0 to 9, cycling every 10 years
@@ -310,7 +392,18 @@ F = Flight number of the day; 1 to 9 then A=10 through Z=35
 void makeFlightLogName()
 {
     char buf[4];
-    String basename = "/logs/";
+#if defined(ESP32)
+    String basename = "/logs/";   // SD_BASEPATH;
+    FlightLogFilename = FlightLogPath + 6;
+    if (PSRAMbuf) {
+        basename = "";
+        FlightLogFilename = FlightLogPath;
+    }
+#else
+    String basename = "/";  // BASEPATH;
+    FlightLogFilename = FlightLogPath + 1;
+#endif
+    //FlightLogFilename = FlightLogPath + strlen(basename.c_str());  // no actual name yet
     uint16_t year = gnss.date.year() - 2000;
     char c = ((uint8_t)'0' + (uint8_t)(year % 10));
     basename += c;
@@ -335,23 +428,27 @@ void makeFlightLogName()
     String filename = basename;
     filename += flightn;
     filename += ".IGC";
-    while (SD.exists(filename)) {
-        Serial.print(filename);
-        Serial.println(" already exists");
-        ++flightnum;
-        if (flightnum < 10) {
-            ++flightn;
-        } else if (flightnum < 36) {
-            flightn = ('A' + (flightnum-10));
-        } else {
-            SD.remove(filename);   // overwrite this one
-            break;
+    if (! PSRAMbuf) {
+        while (IGCFILESYS.exists(filename.c_str())) {
+            Serial.print(filename);
+            Serial.println(" already exists");
+            ++flightnum;
+            if (flightnum < 10) {
+                ++flightn;
+            } else if (flightnum < 36) {
+                flightn = ('A' + (flightnum-10));
+            } else {
+                IGCFILESYS.remove(filename.c_str());   // overwrite this one
+                break;
+            }
+            filename = basename;
+            filename += flightn;
+            filename += ".IGC";
         }
-        filename = basename;
-        filename += flightn;
-        filename += ".IGC";
     }
     strcpy(FlightLogPath, filename.c_str());
+    Serial.print("New flight log: ");
+    Serial.println(FlightLogPath);
 }
 
 bool writeIGCHeader()
@@ -359,67 +456,37 @@ bool writeIGCHeader()
     if (! FlightLogOpen)
         return false;
 
-    if (!SD.exists(INI_FILE)) {
-        Serial.println(F("Creating IGC_CONF file..."));
-        File file = SD.open(INI_FILE, FILE_WRITE);
-        if (! file) {
-            Serial.println(F("... failed"));
-            return false;
-        }
-        file.println(CONFIG_DEFAULT_PILOT);
-        file.println(CONFIG_DEFAULT_TYPE);
-        file.println(CONFIG_DEFAULT_REG);
-        file.println(CONFIG_DEFAULT_CS);
-        file.close();
-    }
-
-    File conf = SD.open(INI_FILE, FILE_READ);
-    if (! conf) {
-        Serial.println(F("failed to open IGC_CONF file"));
-        return false;
-    }
     char buf[80];
     Serial.println(F("Writing IGC Header..."));
     snprintf(buf, 80, "AXLK%06X\r\n", (SoC->getChipId() & 0x00FFFFFF));
-    strupr(buf);
+    strupr(buf);      // redundant since "%06X" above?
     igc_file_append_nonconst(buf);    // 6 hex digits (only 3 in file name)
     int y = gnss.date.year() - 2000;
     snprintf(buf, 80, "HFDTE%02d%02d%02d\r\n", gnss.date.day(), gnss.date.month(), y);
     igc_file_append_nonconst(buf);
     igc_file_append_const("HFFXA035\r\n");
-    char buf2[52];
-    const char *cp;
-    cp = getline(conf, buf2, sizeof(buf2));
-    if (cp == NULL)
-        cp = CONFIG_DEFAULT_PILOT;
-    snprintf(buf, 80, "HFPLTPILOTINCHARGE: %s\r\n", cp);
+    snprintf(buf, 80, "HFPLTPILOTINCHARGE: %s\r\n", settings->igc_pilot);
     Serial.print(buf);
     igc_file_append_commas(buf);
-    cp = getline(conf, buf2, sizeof(buf2));
-    if (cp == NULL)
-        cp = CONFIG_DEFAULT_TYPE;
-    snprintf(buf, 80, "HFGTYGLIDERTYPE: %s\r\n", cp);
+    snprintf(buf, 80, "HFGTYGLIDERTYPE: %s\r\n", settings->igc_type);
     Serial.print(buf);
     igc_file_append_commas(buf);
-    cp = getline(conf, buf2, sizeof(buf2));
-    if (cp == NULL)
-        cp = CONFIG_DEFAULT_REG;
-    snprintf(buf, 80, "HFGIDGLIDERID: %s\r\n", cp);
+    snprintf(buf, 80, "HFGIDGLIDERID: %s\r\n", settings->igc_reg);
     Serial.print(buf);
     igc_file_append_commas(buf);
-    cp = getline(conf, buf2, sizeof(buf2));
-    if (cp == NULL)
-        cp = CONFIG_DEFAULT_CS;
-    snprintf(buf, 80, "HFCIDCOMPETITIONID: %s\r\n", cp);
+    snprintf(buf, 80, "HFCIDCOMPETITIONID: %s\r\n", settings->igc_cs);
     Serial.print(buf);
     igc_file_append_commas(buf);
     //printf("HFCCLCOMPETITIONCLASS: %s\r\n",____);
-    conf.close();
     igc_file_append_const("HFFTYFRTYPE: SoftRF\r\n");
     snprintf(buf, 80, "HFRFWFIRMWAREVERSION: %s\r\n", SOFTRF_FIRMWARE_VERSION);
     //Serial.print(buf);
     igc_file_append_nonconst(buf);
+#if defined(ESP32)
     igc_file_append_const("HFRHWHARDWAREVERSION: T-Beam\r\n");
+#elif defined(ARDUINO_ARCH_NRF52)
+    igc_file_append_const("HFRHWHARDWAREVERSION: T-Echo\r\n");
+#endif
     //igc_file_append_const("HFGPSRECEIVER: Generic\r\n");
     if (baro_chip != NULL) {
         strcpy(buf, "HFPRSPRESSALTSENSOR: Bosch,BME280,9163m\r\n");
@@ -430,6 +497,9 @@ bool writeIGCHeader()
     igc_file_append_const("HFALGALTGPS:GEO\r\n");     // for non IGC loggers
     igc_file_append_const("HFDTM100GPSDATUM: WGS-1984\r\n");
     igc_file_append_const("I00\r\n");   // >>> may add FXA etc later
+    //snprintf(buf, 80, "LPLT original file name: %s\r\n", FlightLogFilename);
+    //Serial.print(buf);
+    //igc_file_append_nonconst(buf);
     return true;  
 }
 
@@ -454,34 +524,61 @@ void openFlightLog()
 {
     if (FlightLogFail)
         return;
-    if (FlightLogOpen)
-        return;
     if (GNSSTimeMarker == 0)
         return;
     if (settings->logflight == FLIGHT_LOG_ALWAYS) {
         // pause before starting another log, to allow shutdown instead
-        if (FlightLogClosed != 0 && millis() < FlightLogClosed + 60000)
+        if ((! PSRAMbuf) && FlightLogClosed != 0 && millis() < FlightLogClosed + 90000)
             return;
     }
-    makeFlightLogName();
-    FlightLog = SD.open(FlightLogPath, FILE_WRITE);
-    if (FlightLog) {
-        FlightLog.close();      // will be reopen()ed later
+
+    if (PSRAMbufUsed) {       // already have data in PSRAMbuf
+        // keep on adding to same "file" - FlightLogPosition kept as it was
+        data_block_used = 0;  // was also done when completing the previous "file"
         FlightLogOpen = true;
-        Serial.print("New flight log: ");
-        Serial.println(FlightLogPath);
-        data_block_used = 0;
-        FlightLogPosition = 0;
-        init_md5();
-        writeIGCHeader();       // into PSRAM block
         return;
     }
-    Serial.println("Failed to open flight log for writing");
-    FlightLogFail = true;
+
+    // get here if no PSRAMbuf or first use of PSRAMbuf
+
+    makeFlightLogName();
+    init_md5();
+
+    if (! PSRAMbuf) {
+#if defined(ARDUINO_ARCH_NRF52)
+      // do not start new log if not enough space for 3 hours of recording
+      uint32_t needed_kb = 50 + (400 >> (settings->loginterval));
+      static uint32_t free_kb = (IGCFS_is_mounted? IGCFS_free_kb() : 0);
+      Serial.print("igc_file kb needed: ");
+      Serial.print(needed_kb);
+      Serial.print(" free: ");
+      Serial.println(free_kb);
+      if (free_kb < needed_kb) {
+          failFlightLog();
+          return;
+      }
+#endif
+      FlightLog = IGCFILESYS.open(FlightLogPath, FILE_WRITE);
+      if (! FlightLog) {
+          Serial.println("Failed to open flight log for writing");
+          FlightLogFail = true;
+          return;
+      }
+      FlightLog.close();      // will be reopen()ed later
+    }
+
+    FlightLogPosition = 0;
+    data_block_used = 0;
+    FlightLogOpen = true;
+    writeIGCHeader();         // to cache
 }
 
-bool logFlightPosition()
+void logFlightPosition()
 {
+    if (! pre_positions_buf)  // FlightLog_setup() has not happened
+    	FlightLog_setup();
+    if (FlightLogFail)
+        return;
     if (! FlightLogOpen && settings->logflight == FLIGHT_LOG_ALWAYS)
         openFlightLog();
     // if FLIGHT_LOG_AIRBORNE then Wind.cpp/this_airborne() will open the file on takeoff 
@@ -499,20 +596,14 @@ bool logFlightPosition()
         // populate a ring buffer of positions
         // to be used to start the flight log once it is opened
         if (FlightLogFail)
-            return false;
+            return;
         if (settings->logflight != FLIGHT_LOG_AIRBORNE
          && settings->logflight != FLIGHT_LOG_TRAFFIC)
-            return false;
+            return;
         prepositioning = true;
     } else if (prepositioning) {   // but now FlightLogOpen
         // write the stored positions to the newly opened file
         for (int i=0; i<num_pre_positions; i++) {
-//if (i==0) {
-//Serial.print("incl pre-pos from: [");
-//Serial.print(pre_positions_head);
-//Serial.print("]: ");
-//Serial.print(pre_positions_buf + (B_RECORD_SIZE * pre_positions_head));
-//}
             igc_file_append_nonconst(pre_positions_buf + (B_RECORD_SIZE * pre_positions_head));
             pre_positions_head = (pre_positions_head + 1) % PRE_POS_NUM;
         }
@@ -532,7 +623,7 @@ bool logFlightPosition()
     if (*gp == '\0') {           // set in GNSS.cpp
         //Serial.print("Bad GGA skipped");
         //Serial.println(GPGGA_Copy);
-        return false;
+        return;
     }
     char *bp = &brecord_template[1];
     *bp++ = *gp++;
@@ -549,7 +640,7 @@ bool logFlightPosition()
     if (*gp != '.') {
         Serial.print("Bad GGA: ");
         Serial.println(GPGGA_Copy);
-        return false;
+        return;
     }
     ++gp;            // skip the period
     *bp++ = *gp++;
@@ -559,7 +650,7 @@ bool logFlightPosition()
     if (*gp != 'N' && *gp != 'S') {
         Serial.print("Bad GGA: ");
         Serial.println(GPGGA_Copy);
-        return false;
+        return;
     }
     *bp++ = *gp++;
     ++gp;            // skip the comma, to start of lon
@@ -571,7 +662,7 @@ bool logFlightPosition()
     if (*gp != '.') {
         Serial.print("Bad GGA: ");
         Serial.println(GPGGA_Copy);
-        return false;
+        return;
     }
     ++gp;            // skip the period
     *bp++ = *gp++;
@@ -581,7 +672,7 @@ bool logFlightPosition()
     if (*gp != 'E' && *gp != 'W') {
         Serial.print("Bad GGA: ");
         Serial.println(GPGGA_Copy);
-        return false;
+        return;
     }
     *bp++ = *gp;
 
@@ -598,10 +689,6 @@ bool logFlightPosition()
     snprintf(pp, B_RECORD_SIZE, brecord_template, palt, galt);
 
     if (prepositioning) {
-//Serial.print("pre-position[");
-//Serial.print(pre_positions_next);
-//Serial.print("]: ");
-//Serial.print(pp);
         pre_positions_next = (pre_positions_next + 1) % PRE_POS_NUM;
         if (num_pre_positions < PRE_POS_NUM)
             ++num_pre_positions;
@@ -611,8 +698,6 @@ bool logFlightPosition()
         igc_file_append_nonconst(buf);
         //igc_file_append_const(pp);  if can skip the checking of chars
     }
-
-    return true;
 }
 
 // must be given a null-terminated string
@@ -656,18 +741,28 @@ void test_final(MD5_CTX *md5)
 void MD5_test()
 {
     if (! (settings->debug_flags & DEBUG_SIMULATE))  return;
+    if (FlightLogFail)  return;
+#if defined(ESP32)
+    if (SD_is_mounted == false)  return;
+#endif
     //MD5::make_hash(md5_a, "abcdefghijklmnopqrstuvwxyz");
     //Serial.println("MD5 should be:   c3fcd3d76192e4007dfb496cca67e13b");
     //Serial.print("MD5 computed as: ");
     //Serial.println(MD5::make_digest(md5_a));
     init_md5();
-    File file = SD.open("/logs/TEST.TXT", FILE_READ);
+#if defined(ESP32)
+    String filename = "/logs/";   // SD_BASEPATH;
+#else
+    String filename = "/";  // BASEPATH;
+#endif
+    filename += "TEST.TXT";
+    File file = IGCFILESYS.open(filename.c_str(), FILE_READ);
     if (! file)  return;
     Serial.println("MD5 test:");
     const char *cp;
     char buf[128];
-    while (cp = getline(file, buf, sizeof(buf))) {
-        MD5_update(cp, strlen(cp));
+    while (getline(file, buf, sizeof(buf))) {
+        MD5_update(buf, strlen(cp));
         yield();
     }
     file.close();
@@ -677,4 +772,3 @@ void MD5_test()
     test_final(md5_d);
 }
 
-#endif
