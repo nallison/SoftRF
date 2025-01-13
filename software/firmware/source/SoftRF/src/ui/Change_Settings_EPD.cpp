@@ -25,7 +25,7 @@
 #include <TimeLib.h>
 
 #include "../TrafficHelper.h"
-#include "../driver/EEPROM.h"
+#include "../driver/Settings.h"
 #include "../protocol/data/NMEA.h"
 #include "../protocol/data/GDL90.h"
 #include "../driver/GNSS.h"
@@ -57,6 +57,7 @@ set_entry actypes[] = {
   {AIRCRAFT_TYPE_BALLOON,    "Balloon"},
   {AIRCRAFT_TYPE_UAV,        "UAV"},
   {AIRCRAFT_TYPE_STATIC,     "Static"},
+  {AIRCRAFT_TYPE_WINCH,      "Winch"},
   {-1, NULL}
 };
 
@@ -260,7 +261,8 @@ void EPD_chgconf_save()
     ui->orientation = directions[direction].code;
     SoC->WDT_fini();
     if (SoC->Bluetooth_ops) { SoC->Bluetooth_ops->fini(); }
-    EEPROM_store();
+    //EEPROM_store();
+    save_settings_to_file();
 }
 
 /*

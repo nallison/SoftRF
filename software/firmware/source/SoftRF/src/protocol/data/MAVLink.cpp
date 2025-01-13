@@ -26,7 +26,7 @@
 #include "GDL90.h"
 #include "../../driver/WiFi.h"
 #include "../../TrafficHelper.h"
-#include "../../driver/EEPROM.h"
+#include "../../driver/Settings.h"
 #include "../../driver/RF.h"
 
 static unsigned long MAVLinkTimeSyncMarker = 0;

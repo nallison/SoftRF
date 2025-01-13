@@ -108,11 +108,11 @@ extern float average_baro_alt_diff;
 extern uint8_t adsb_acfts;
 extern int8_t maxrssi;
 
-#if defined(ESP32)
+//#if defined(ESP32)
 extern File AlarmLog;
 extern bool AlarmLogOpen;
 void startlogs(void);
 void stoplogs(void);
-#endif
+//#endif
 
 #endif /* TRAFFICHELPER_H */

@@ -1,22 +1,28 @@
 #include "../system/SoC.h"
 
-#if defined(ESP32)
+#include "Filesys.h"
 
-// Read one line from an open text file (SPIFFS or SD)
+// Read one line from an open text file
 // Handle possibly different types of line endings
-// Used for reading a config file with pilot name etc
-char *
-getline(File file, char *buf, int limit)
+// Used for reading the settings file, and also for reading a config file
+// for IGC with pilot name etc, and for reading ADS-B distance stats
+//
+// In nRF52, using Arduino SDfat library (via Adafruit spiflash),
+// the File object holds its own copy of the file position, thus here
+// must be passed by reference or will always read the first line again!
+
+bool getline(File &infile, char *buf, int limit)
 {
     char *cp, *tp;
     char c;
     cp = buf;
     tp = cp + (limit-2);
-    while (file.available() && cp<tp) {
-        c = file.read();
+    while (infile.read((uint8_t*)&c,1) == 1 && cp < tp) {
         if (cp == buf) {
-            if (c == '\r')  continue;
-            if (c == '\n')  continue;
+            if (c == '\r' || c == '\n') {
+                --tp;       // in case the file has just endless newlines
+                continue;
+            }
         }
         if (c == '\r')  break;
         if (c == '\n')  break;
@@ -24,19 +30,19 @@ getline(File file, char *buf, int limit)
         *cp++ = c;
     }
     *cp = '\0';
-    if (cp == buf)     // read nothing
-        return (NULL);
-    return (buf);
+    return (cp != buf);     // read something
 }
+
+#if defined(ESP32)
+
+bool SD_is_mounted = false;    // even if not using SD card can check this
 
 #if defined(USE_SD_CARD)
 
 #include <SPI.h>
 #include <SD.h>
 #include <FS.h>
-
-#include "SDcard.h"
-#include "EEPROM.h"
+#include "Settings.h"
 #include "OLED.h"
 #include "../protocol/data/IGC.h"
 
@@ -46,7 +52,7 @@ SPIClass SD_HSPI = SPIClass(HSPI);  // for a separate SPI bus for the SD card
 static uint8_t ss_pin;
 static uint8_t cardType = CARD_NONE;
 static File SDfile;
-bool SDfileOpen = false;
+bool SDlogOpen = false;
 File SIMfile;
 File TARGETfile;
 bool SIMfileOpen = false;
@@ -104,7 +110,7 @@ void performUpdate()
     }
 }
 
-void SD_setup() {
+void Filesys_setup() {
   if (settings->sd_card == SD_CARD_NONE)
       return;
   if (settings->sd_card == SD_CARD_13_25) {
@@ -171,6 +177,12 @@ void SD_setup() {
   }
   cardSize >>= 20;
   Serial.printf("SD Card Size: %dMB\n", (uint32_t)cardSize);
+  // these functions not available in the Arduino SD library:
+  //uint32_t free_kb = (SD.freeClusterCount() >> 10);   // Kclusters
+  //free_kb *= (SD.blocksPerCluster() >> 1);            // Mbytes
+  //Serial.printf("  Free space: %dMB\n", free_kb);
+
+  SD_is_mounted = true;
 
   // check for firmware update file
   performUpdate();
@@ -201,7 +213,7 @@ void SD_setup() {
       SDfile = SD.open("/logs/log.txt", FILE_WRITE);
   }
   if (SDfile)
-      SDfileOpen = true;
+      SDlogOpen = true;
   else
       Serial.println("Failed to open SD/logs/log.txt for writing");
 
@@ -235,7 +247,7 @@ void SD_setup() {
 
 void SD_log(const char * message)
 {
-  if (SDfileOpen) {
+  if (SDlogOpen) {
     bool success = SDfile.print(message);
     if (success) {
         Serial.println("- Message appended to SD log.txt");
@@ -248,11 +260,66 @@ void SD_log(const char * message)
 
 void closeSDlog()
 {
-  if (SDfileOpen) {
+  if (SDlogOpen) {
       SDfile.close();
-      SDfileOpen = false;
+      SDlogOpen = false;
   }
 }
 
+// get free space in SD
+uint32_t IGCFS_free_kb()
+{
+  if (! SD_is_mounted)
+      return 0;
+  return 1000;  // simply assume there is enough space
+  // because this may be slow to run on a large SD card:
+  // also these functions are not available.
+  //uint32_t free_kb = SD.freeClusterCount();      // clusters
+  //free_kb *= (SD.blocksPerCluster() >> 1);       // kbytes
+  //return free_kb;
+}
+
 #endif // USE_SD_CARD
+
+// get free space in SPIFFS
+uint32_t FILESYS_free_kb()
+{
+  if (! SPIFFS_is_mounted)
+      return 0;
+  uint32_t free_kb = SPIFFS.totalBytes() - SPIFFS.usedBytes();
+  free_kb >>= 10;       // kbytes
+  return free_kb;
+}
+
 #endif // ESP32
+
+#if defined(ARDUINO_ARCH_NRF52)
+
+void Filesys_setup() {}   // nothing needs to be done, fatfs was already mounted in SoC setup
+
+// get free space in FATFS
+uint32_t FILESYS_free_kb()
+{
+  if (! FS_is_mounted)
+      return 0;
+  uint32_t free_kb = FILESYS.freeClusterCount();   // clusters
+Serial.print("FATFS freeClusterCount: ");
+Serial.println(free_kb);
+  uint32_t blocks = FILESYS.blocksPerCluster();
+Serial.print("FATFS.blocksPerCluster(): ");
+Serial.println(blocks);
+  free_kb *= blocks;
+  free_kb >>= 1;          // kbytes - assumes block = 512 bytes
+  return free_kb;
+}
+
+// flight log also stored in FATFS
+uint32_t IGCFS_free_kb() { return FILESYS_free_kb(); }
+
+#endif
+
+#if defined(FILESYS)
+
+// put generic file sys ops here
+
+#endif  /* FILESYS */

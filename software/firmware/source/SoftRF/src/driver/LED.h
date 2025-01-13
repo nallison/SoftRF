@@ -21,7 +21,7 @@
 
 #include "../system/SoC.h"
 #include "GNSS.h"
-#include "EEPROM.h"
+#include "Settings.h"
 
 #define STATUS_LED_NUM  4
 //#define RING_LED_NUM (ESP.getChipId() == 0xeacdd ? 12 : 8)

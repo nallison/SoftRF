@@ -21,7 +21,7 @@
 #endif
 
 #include "../system/SoC.h"
-#include "EEPROM.h"
+#include "Settings.h"
 #include "Battery.h"
 
 unsigned long Battery_TimeMarker        = 0;

@@ -28,12 +28,15 @@
 #include <Adafruit_SPIFlash.h>
 #include "Adafruit_TinyUSB.h"
 #include <Adafruit_SleepyDog.h>
+#if defined(USE_JSON_SETTINGS)
 #include <ArduinoJson.h>
+#endif
 #include "nrf_wdt.h"
 
 #include "../system/SoC.h"
 #include "../driver/RF.h"
-#include "../driver/EEPROM.h"
+#include "../driver/Settings.h"
+#include "../driver/Filesys.h"
 #include "../driver/GNSS.h"
 #include "../driver/Baro.h"
 #include "../driver/LED.h"
@@ -44,7 +47,10 @@
 #include "../protocol/data/NMEA.h"
 #include "../protocol/data/GDL90.h"
 #include "../protocol/data/D1090.h"
+#include "../protocol/data/IGC.h"
+#if defined(USE_JSON_SETTINGS)
 #include "../protocol/data/JSON.h"
+#endif
 #include "../system/Time.h"
 
 #include "uCDB.hpp"
@@ -92,7 +98,7 @@ static uint32_t prev_tx_packets_counter = 0;
 static uint32_t prev_rx_packets_counter = 0;
 extern uint32_t tx_packets_counter, rx_packets_counter;
 
-static struct rst_info reset_info = {
+struct rst_info reset_info = {
   .reason = REASON_DEFAULT_RST,
 };
 
@@ -125,9 +131,10 @@ I2CBus        *i2c = nullptr;
 static bool nRF52_has_rtc      = false;
 static bool nRF52_has_spiflash = false;
 static bool RTC_sync           = false;
-static bool FATFS_is_mounted   = false;
 static bool ADB_is_open        = false;
 static bool screen_saver       = false;
+
+bool FATFS_is_mounted = false;
 
 RTC_Date fw_build_date_time = RTC_Date(__DATE__, __TIME__);
 
@@ -211,9 +218,10 @@ Adafruit_USBD_MSC usb_msc;
 // file system object from SdFat
 FatFileSystem fatfs;
 
+#if defined(USE_JSON_SETTINGS)
 #define NRF52_JSON_BUFFER_SIZE  1024
-
 StaticJsonDocument<NRF52_JSON_BUFFER_SIZE> nRF52_jsonDoc;
+#endif
 
 #if defined(USE_WEBUSB_SERIAL) || defined(USE_WEBUSB_SETTINGS)
 // USB WebUSB object
@@ -239,7 +247,8 @@ Adafruit_USBD_MIDI usb_midi;
 MIDI_CREATE_INSTANCE(Adafruit_USBD_MIDI, usb_midi, MIDI_USB);
 #endif /* USE_USB_MIDI */
 
-ui_settings_t ui_settings = {
+ui_settings_t ui_settings;
+/* = {
 #if defined(DEFAULT_REGION_US)
     .units        = UNITS_IMPERIAL,
 #else
@@ -256,9 +265,9 @@ ui_settings_t ui_settings = {
     .aghost       = ANTI_GHOSTING_OFF,
     .filter       = TRAFFIC_FILTER_OFF,
     .team         = 0
-};
+}; */
 
-ui_settings_t *ui;
+//ui_settings_t *ui;
 uCDB<FatFileSystem, File> ucdb(fatfs);
 
 #if !defined(EXCLUDE_IMU)
@@ -310,7 +319,7 @@ static void nRF52_msc_flush_cb (void)
 
 static void nRF52_setup()
 {
-  ui = &ui_settings;
+  // ui = &ui_settings;
 
   uint32_t reset_reason = readResetReason();
 
@@ -661,6 +670,12 @@ static void nRF52_post_init()
     Serial.flush();
   }
 
+  if (FATFS_is_mounted)
+      Serial.printf("FATFS mounted, free space: %d kB\n", FILESYS_free_kb());
+  else
+      Serial.println("Failed to mount FATFS");
+  Serial.println();
+
   Serial.println(F("Data output device(s):"));
 
   Serial.print(F("NMEA   - "));
@@ -676,6 +691,7 @@ static void nRF52_post_init()
   print_dest(settings->d1090);
 
   Serial.println();
+
   Serial.flush();
 
 #if defined(USE_EPAPER)
@@ -769,6 +785,8 @@ static void nRF52_loop()
 
   if (USBDevice.mounted() && usb_web.connected() && usb_web.available()) {
 
+#if defined(USE_JSON_SETTINGS)
+
     deserializeJson(nRF52_jsonDoc, usb_web);
     JsonObject root = nRF52_jsonDoc.as<JsonObject>();
 
@@ -795,6 +813,8 @@ static void nRF52_loop()
       }
     }
   }
+
+#endif /* USE_JSON_SETTINGS */
 
 #endif /* USE_WEBUSB_SETTINGS */
 
@@ -1158,7 +1178,7 @@ static bool nRF52_EEPROM_begin(size_t size)
 
 static void nRF52_EEPROM_extension(int cmd)
 {
-  uint8_t *raw = (uint8_t *) ui;
+  uint8_t *raw = (uint8_t *) &ui_settings;
 
   switch (cmd)
   {
@@ -1168,34 +1188,36 @@ static void nRF52_EEPROM_extension(int cmd)
       }
       return;
     case EEPROM_EXT_DEFAULTS:
-      ui->adapter      = 0;
-      ui->connection   = 0;
+      //ui_settings.adapter      = 0;
+      //ui_settings.connection   = 0;
 #if defined(DEFAULT_REGION_US)
-      ui->units        = UNITS_IMPERIAL;
+      ui_settings.units        = UNITS_IMPERIAL;
 #else
-      ui->units        = UNITS_METRIC;
+      ui_settings.units        = UNITS_METRIC;
 #endif
-      ui->zoom         = ZOOM_MEDIUM;
-      ui->protocol     = PROTOCOL_NMEA;
-      ui->baudrate     = 0;
-      strcpy(ui->server, "");
-      strcpy(ui->key,    "");
-      ui->rotate       = ROTATE_0;
-      ui->orientation  = DIRECTION_TRACK_UP;
-      ui->adb          = DB_NONE;
-      ui->idpref       = ID_TYPE;
-      ui->vmode        = VIEW_MODE_STATUS;
-      ui->voice        = VOICE_OFF;
-      ui->aghost       = ANTI_GHOSTING_OFF;
-      ui->filter       = TRAFFIC_FILTER_OFF;
-      ui->power_save   = 0;
-      ui->team         = 0;
+      ui_settings.zoom         = ZOOM_MEDIUM;
+      //ui_settings.protocol     = PROTOCOL_NMEA;
+      //ui_settings.baudrate     = 0;
+      //strcpy(ui->server, "");
+      //strcpy(ui->key,    "");
+      ui_settings.rotate       = ROTATE_0;
+      ui_settings.orientation  = DIRECTION_TRACK_UP;
+      ui_settings.adb          = DB_NONE;
+      ui_settings.epdidpref    = ID_TYPE;
+      ui_settings.viewmode     = VIEW_MODE_STATUS;
+      ui_settings.voice        = VOICE_OFF;
+      ui_settings.antighost    = ANTI_GHOSTING_OFF;
+      //ui_settings.filter       = TRAFFIC_FILTER_OFF;
+      ui_settings.power_save   = 0;
+      ui_settings.team         = 0;
       break;
     case EEPROM_EXT_LOAD:
     default:
       for (int i=0; i<sizeof(ui_settings_t); i++) {
         raw[i] = EEPROM.read(sizeof(eeprom_t) + i);
       }
+
+#if defined(USE_JSON_SETTINGS)
 
       if ( nRF52_has_spiflash && FATFS_is_mounted ) {
         File file = fatfs.open("/settings.json", FILE_READ);
@@ -1220,6 +1242,8 @@ static void nRF52_EEPROM_extension(int cmd)
         }
       }
 
+#endif // USE_JSON_SETTINGS
+
 #if defined(USE_WEBUSB_SETTINGS) && !defined(USE_WEBUSB_SERIAL)
 
       usb_web.setLandingPage(&landingPage);
@@ -1227,31 +1251,8 @@ static void nRF52_EEPROM_extension(int cmd)
 
 #endif /* USE_WEBUSB_SETTINGS */
 
-      if (settings->mode != SOFTRF_MODE_GPSBRIDGE
-#if !defined(EXCLUDE_TEST_MODE)
-          &&
-          settings->mode != SOFTRF_MODE_TXRX_TEST
-#endif /* EXCLUDE_TEST_MODE */
-          ) {
-        settings->mode = SOFTRF_MODE_NORMAL;
-      }
-
-      if (settings->nmea_out == DEST_UDP  ||
-          settings->nmea_out == DEST_TCP ) {
-        settings->nmea_out = DEST_BLUETOOTH;
-      }
-      if (settings->gdl90 == DEST_UDP) {
-        settings->gdl90 = DEST_BLUETOOTH;
-      }
-      if (settings->d1090 == DEST_UDP) {
-        settings->d1090 = DEST_BLUETOOTH;
-      }
-
       break;
   }
-
-  if (reset_info.reason == REASON_SOFT_RESTART)
-      ui->vmode = VIEW_MODE_CONF;     // after software restart show the settings
 }
 
 static void nRF52_SPI_begin()
@@ -1518,20 +1519,18 @@ static float nRF52_Battery_param(uint8_t param)
     break;
 
   case BATTERY_PARAM_CHARGE:
+    // assume a LiPo battery, for which full=4.2, threshold=3.5 and cutoff=3.2
     voltage = Battery_voltage();
-    if (voltage < Battery_cutoff())
+    if (voltage < BATTERY_CUTOFF_LIPO)
       return 0;
-
-    if (voltage > 4.2)
-      return 100;
-
-    if (voltage < 3.6) {
-      voltage -= 3.3;
-      return (voltage * 100) / 3;
+    if (voltage > BATTERY_FULL_LIPO)
+      return 100.0;
+    if (voltage < BATTERY_THRESHOLD_LIPO) {
+      return ((voltage - BATTERY_CUTOFF_LIPO)
+          * (10.0 / (BATTERY_THRESHOLD_LIPO - BATTERY_CUTOFF_LIPO)));   // 0 to 10% over 0.3V
     }
-
-    voltage -= 3.6;
-    rval = 10 + (voltage * 150 );
+    return (10.0 + (voltage - BATTERY_THRESHOLD_LIPO)
+                 * (90.0 / (BATTERY_FULL_LIPO - BATTERY_THRESHOLD_LIPO)));   // 10 to 100% over 0.7V
     break;
 
   case BATTERY_PARAM_VOLTAGE:
@@ -1627,9 +1626,13 @@ void handleEvent(AceButton* button, uint8_t eventType,
           Serial.println(F("kEventReleased."));
         }
 #endif
-        EPD_Mode();
-      } else if (button == &button_2) {
-        EPD_Up();
+        if (FlightLogOpen)
+            completeFlightLog();   // manually ensure complete flight log
+        EPD_Mode(screen_saver);    // if screen_saver then redraws current page/mode
+        screen_saver = false;
+      } else if (button == &button_2) {    // touch
+        if (! screen_saver)
+            EPD_Up();
       }
 #endif
       break;
@@ -1656,8 +1659,9 @@ void handleEvent(AceButton* button, uint8_t eventType,
         digitalWrite(SOC_GPIO_PIN_EPD_BLGT,
                      digitalRead(SOC_GPIO_PIN_EPD_BLGT) == LOW);
         }
-      } else if (button == &button_2) {
-        EPD_Down();
+      } else if (button == &button_2) {    // touch
+        if (! screen_saver)
+            EPD_Down();
 #endif
       }
       break;
@@ -1666,12 +1670,23 @@ void handleEvent(AceButton* button, uint8_t eventType,
       if (button == &button_1) {
 
 #if defined(USE_EPAPER)
-            if (digitalRead(SOC_GPIO_PIN_PAD) == LOW) {
+            if (digitalRead(SOC_GPIO_PIN_PAD) == LOW)     // touch while long-press
                 screen_saver = true;
-            }
+            else
+                screen_saver = false;
 #endif
             shutdown(SOFTRF_SHUTDOWN_BUTTON);
             Serial.println(F("This too will never be printed."));
+
+#if defined(USE_EPAPER)
+      } else if (button == &button_2) {    // long touch
+          if (digitalRead(SOC_GPIO_PIN_BUTTON) != LOW) {    // long-touch without push
+            EPD_Message("SCREEN", "SAVER");
+            delay (1500);
+            screen_saver = true;             // ignore touch until mode button pressed
+            EPD_Message(NULL, NULL);         // blank the screen
+          }
+#endif
       }
       break;
   }
@@ -1719,6 +1734,10 @@ static void nRF52_Button_setup()
   ButtonConfig* UpButtonConfig = button_2.getButtonConfig();
   UpButtonConfig->setEventHandler(handleEvent);
   UpButtonConfig->setFeature(ButtonConfig::kFeatureClick);
+  UpButtonConfig->setFeature(ButtonConfig::kFeatureDoubleClick);
+  UpButtonConfig->setFeature(ButtonConfig::kFeatureLongPress);
+  UpButtonConfig->setFeature(ButtonConfig::kFeatureSuppressAfterClick);
+  UpButtonConfig->setFeature(ButtonConfig::kFeatureSuppressAfterDoubleClick);
 //  UpButtonConfig->setDebounceDelay(15);
   //UpButtonConfig->setClickDelay(600);
   //UpButtonConfig->setDoubleClickDelay(1500);
@@ -1916,7 +1935,7 @@ static bool nRF52_ADB_query(uint8_t type, uint32_t id, char *buf, size_t size)
       }
       out[i] = 0;
 
-      switch (ui->idpref)
+      switch (ui->epdidpref)
       {
       case ID_TAIL:
         snprintf(buf, size, "CN: %s",

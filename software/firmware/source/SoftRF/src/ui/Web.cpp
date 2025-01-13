@@ -37,7 +37,7 @@ void Web_fini()     {}
 #include "../driver/Battery.h"
 #include "../driver/RF.h"
 #include "Web.h"
-#include "../driver/EEPROM.h"
+#include "../driver/Settings.h"
 #include "../driver/OLED.h"
 #include "../driver/GNSS.h"
 #include "../driver/Baro.h"
@@ -46,7 +46,7 @@ void Web_fini()     {}
 #include "../driver/Voice.h"
 #include "../driver/Bluetooth.h"
 #if defined(USE_SD_CARD)
-#include "../driver/SDcard.h"
+#include "../driver/Filesys.h"
 #endif
 #include "../TrafficHelper.h"
 #include "../protocol/radio/Legacy.h"
@@ -183,43 +183,49 @@ Copyright (C) 2015-2021 &nbsp;&nbsp;&nbsp; Linar Yusupov\
 </body>\
 </html>";
 
-#if defined(USE_EGM96)
-static const char egm96_upload_html[] PROGMEM =
-"<html>\
- <p>Select and upload egm96s.dem</p>\
- <form method='POST' action='/doegmupld' enctype='multipart/form-data'>\
+void set_upload(char *buf, const char *filename, const char *pageurl)
+{
+  snprintf_P ( buf, 300, PSTR(
+ "<html>\
+ <p>Select and upload %s</p>\
+ <form method='POST' action='%s' enctype='multipart/form-data'>\
  <input type='file' name='name'><input type='submit' value='Upload' title='Upload'>\
  </form>\
- </html>";
-#endif
-
-#if defined(ESP32)
-static const char settings_upload_html[] PROGMEM =
-"<html>\
- <p>Select and upload settings.txt</p>\
- <form method='POST' action='/dostgupld' enctype='multipart/form-data'>\
- <input type='file' name='name'><input type='submit' value='Upload' title='Upload'>\
- </form>\
- </html>";
-static const char wav_upload_html[] PROGMEM =
-"<html>\
- <p>Select and upload waves.tar (read instructions first)</p>\
- <form method='POST' action='/dowavupld' enctype='multipart/form-data'>\
- <input type='file' name='name'><input type='submit' value='Upload' title='Upload'>\
- </form>\
- </html>";
-#endif
-
-static const char log_upload_html[] PROGMEM =
-"<html>\
- <p>Select and upload a file into SD/logs</p>\
- <form method='POST' action='/dologupld' enctype='multipart/form-data'>\
- <input type='file' name='name'><input type='submit' value='Upload' title='Upload'>\
- </form>\
- </html>";
+ </html>"), filename, pageurl);
+}
 
 static File UploadFile;
-static const char *textplain = "text/plain";
+
+//static const char *texttext  = "text/text";    // not used
+//static const char *textplain = "text/plain";   // displays in too-small a font?
+static const char *textplain = "text/html";
+static const char *texthtml  = "text/html";
+static const char *octet = "application/octet-stream";
+
+void serve_html(const char *html)
+{
+    SoC->swSer_enableRx(false);
+    server.sendHeader(String(F("Cache-Control")), String(F("no-cache, no-store, must-revalidate")));
+    server.sendHeader(String(F("Pragma")), String(F("no-cache")));
+    server.sendHeader(String(F("Expires")), String(F("-1")));
+    server.send(200, texthtml, html);
+    SoC->swSer_enableRx(true);
+}
+
+void serve_file(File file, const char *filename, const char *rambuf=NULL)
+{
+    char buf[64];
+    snprintf(buf, 64, "attachment; filename=%s", filename);
+    SoC->swSer_enableRx(false);
+    server.sendHeader("Content-Type", octet);
+    server.sendHeader("Content-Disposition", buf);
+    server.sendHeader("Connection", "close");
+    if (rambuf)
+        server.send(200, octet, rambuf);  // must be null-terminated
+    else
+        server.streamFile(file, octet);
+    SoC->swSer_enableRx(true);
+}
 
 void anyUpload(bool toSD)
 {
@@ -266,12 +272,13 @@ void anyUpload(bool toSD)
       UploadFile.close();
       Serial.print(F("Uploaded Size: ")); Serial.println(uploading.totalSize);
       if (uploading.totalSize > 0) {
-        server.send(200, textplain, "uploaded file");
+        server.send(200, texthtml,
+          "<html><p align=center><h3 align=center>uploaded file</h3></p></html>");
       } else {
-        server.send(500, textplain, "500: uploaded zero bytes");
+        server.send(500, textplain, "uploaded zero bytes");
       }
     } else {
-      server.send(500, textplain, "500: couldn't create file");
+      server.send(500, textplain, "couldn't create file");
     }
   }
   //yield();
@@ -306,8 +313,8 @@ void logUpload()   // into SD card /logs/
 void alarmlogfile(){
 #if defined(USE_SD_CARD)
     closeSDlog();
-    closeFlightLog();
 #endif
+    closeFlightLog();
     if (AlarmLogOpen) {
       AlarmLog.close();
       AlarmLogOpen = false;
@@ -318,11 +325,8 @@ void alarmlogfile(){
     }
     AlarmLog = SPIFFS.open("/alarmlog.txt", FILE_READ);
     if (AlarmLog) {
-      server.sendHeader("Content-Type", "text/text");
-      server.sendHeader("Content-Disposition", "attachment; filename=alarmlog.txt");
-      server.sendHeader("Connection", "close");
-      server.streamFile(AlarmLog, "application/octet-stream");
-      AlarmLog.close();
+        serve_file(AlarmLog, "alarmlog.txt");
+        AlarmLog.close();
     }
 }
 
@@ -333,13 +337,11 @@ void settingsdownload(){
     }
     File file = SPIFFS.open("/settings.txt", FILE_READ);
     if (file) {
-      server.sendHeader("Content-Type", "text/text");
-      server.sendHeader("Content-Disposition", "attachment; filename=settings.txt");
-      server.sendHeader("Connection", "close");
-      server.streamFile(file, "application/octet-stream");
-      file.close();
+        serve_file(file, "settings.txt");
+        file.close();
     }
 }
+
 void settingsupload(){
     anyUpload(false);   // into SPIFFS
 }
@@ -347,14 +349,27 @@ void settingsupload(){
 void settingsbackup(){
     if (! SPIFFS.exists("/settings.txt"))
         save_settings_to_file();
+    if (! SPIFFS.exists("/settings.txt")) {
+        server.send(500, textplain, "failed to write settings.txt");
+        return;
+    }
+    if (SPIFFS.exists("/settingb.txt"))
+        SPIFFS.remove("/settingb.txt");
     SPIFFS.rename("/settings.txt","/settingb.txt");
-    server.send(200, textplain, "Copied settings.txt to settingb.txt");
+    save_settings_to_file();
+    if (! SPIFFS.exists("/settings.txt")) {     // save_settings_to_file() failed
+        SPIFFS.rename("/settingb.txt","/settings.txt");
+        server.send(500, textplain, "failed to make a copy of settings.txt");
+        return;
+    }
+    server.send_P(200, texthtml,
+      PSTR("<html><p align=center><h3 align=center>Copied settings.txt to settingb.txt</h3></p></html>"));
 }
 
-void settingsreboot(){
+void settingsreboot(int status, const char *msg){
 
-    server.send_P(200,
-      PSTR("text/html"),
+  char buf[440];
+  snprintf_P ( buf, 440,
       PSTR("<html>\
 <head>\
 <meta http-equiv='refresh' content='30; url=/'>\
@@ -362,14 +377,14 @@ void settingsreboot(){
 <title>Restarting...</title>\
 </head>\
 <body>\
-  <p align=center><h3 align=center>Settings applied.</h3></p>\
-  <p align=center><h3 align=center>Restart is in progress, please wait...</h3></p>\
+<p align=center><h3 align=center>%s</h3></p>\
+<p align=center><h3 align=center>Restart is in progress, please wait...</h3></p>\
 </body>\
-</html>"));
+</html>"), msg);
+  server.send(status, texthtml, buf);
 
   //Serial.println(F("New settings:"));
   //show_settings_serial();
-  save_settings_to_file();   // this also shows the new settings
 
   SoC->WDT_fini();
   if (SoC->Bluetooth_ops) { SoC->Bluetooth_ops->fini(); }
@@ -383,25 +398,52 @@ void settingsswap(){
         server.send(500, textplain, "settingb.txt backup file does not exist");
         return;
     }
+    if (! SPIFFS.exists("/settings.txt"))
+        save_settings_to_file();
+    if (! SPIFFS.exists("/settings.txt")) {
+        SPIFFS.rename("/settingb.txt","/settings.txt");
+        settingsreboot(500, "no settings.txt and cannot create one, restored settingb.txt");
+        return;
+    }
     SPIFFS.rename("/settingb.txt","/settingt.txt");
-    SPIFFS.rename("/settings.txt","/settingb.txt");  // can fail if settings.txt does not exist
+    SPIFFS.rename("/settings.txt","/settingb.txt");
     SPIFFS.rename("/settingt.txt","/settings.txt");
-    load_settings_from_file();
+    load_settings_from_file();             // test the new settings file
     if (SPIFFS.exists("/settings.txt")) {  // load_settings_from_file() did not fail
-        server.send(200, textplain, "swapped settings.txt & settingb.txt, rebooting...");
+        settingsreboot(200, "swapped settings.txt & settingb.txt");
     } else {
         SPIFFS.remove("/settings.txt");   // former settingb.txt
         SPIFFS.rename("/settingb.txt","/settings.txt");
-        server.send(500, textplain, "invalid settingb.txt, restored settings.txt, reboot in 10 sec");
-        delay(10000);
+        settingsreboot(500, "invalid settingb.txt, restored settings.txt");
     }
-    settingsreboot();
 }
 
-#if defined(USE_SD_CARD)
-void flightlogfile(){
-    closeSDlog();
+void flightlogfile()
+{
     closeFlightLog();
+
+    if (PSRAMbuf) {
+      if (! FlightLogPath[0]) {
+          Serial.println(F("no flight log in PSRAM"));
+          server.send ( 404, textplain, "no flight log in PSRAM");
+          return;
+      }
+      // the only method that worked was to append a null char
+      //    and handle the PSRAMbuf log as a C-string:
+      // server.send(200, octet, PSRAMbuf);
+      // server.sendContent() did not work
+      //    it puts the content in the web page despite "Disposition"
+      PSRAMbuf[PSRAMbufUsed] = '\0';
+      File file;   // dummy - rambuf will be used instead
+      serve_file(file, FlightLogPath, PSRAMbuf);
+      delay(2000);
+      return;
+    }
+
+#if defined(USE_SD_CARD)
+    if (! SD_is_mounted)
+        return;
+    closeSDlog();
     String lastlog = " ";
     bool found = false;
     if (FlightLogPath[0]) {            // the last file written since boot
@@ -412,7 +454,7 @@ void flightlogfile(){
         File root = SD.open("/logs");
         if (! root) {
             Serial.println(F("Cannot open SD/logs"));
-            server.send ( 200, "text/html", "(cannot open SD/logs)");
+            server.send ( 500, textplain, "(cannot open SD/logs)");
             return;
         }
         File file = root.openNextFile();
@@ -434,16 +476,11 @@ void flightlogfile(){
     }
     if (found) {
         Serial.print(F("Sending latest log: ")); Serial.println(lastlog);
-        char buf[64];
-        snprintf(buf, 64, "attachment; filename=%s", lastlog.c_str());
         lastlog = "/logs/" + lastlog;
         File file = SD.open(lastlog.c_str(), FILE_READ);
         if (file) {
-            String contentType = "application/octet-stream";         // fake the MIME type
-            server.sendHeader("Content-Type", contentType);
-            server.sendHeader("Content-Disposition", buf);
-            server.sendHeader("Connection", "close");
-            server.streamFile(file, contentType);
+            serve_file(file, lastlog.c_str()+6);  // skip the "/logs/"
+            delay(2000);
             file.close();
         } else {
             Serial.print(F("Could not open latest log: ")); Serial.println(lastlog);
@@ -452,9 +489,8 @@ void flightlogfile(){
     } else {
         server.send ( 404, textplain, "No flight log found");
     }
-    yield();
-}
 #endif
+}
 
 void handleSettings() {
 
@@ -507,10 +543,10 @@ void handleSettings() {
 </td>\
 </tr>"),
   ((settings->debug_flags & DEBUG_SIMULATE)? "Warning: simulation mode" :
-  (default_settings_used==STG_DEFAULT? "Warning: reverted to default settings" :
+  (settings_used==STG_DEFAULT? "Warning: reverted to default settings" :
   (BTpaused ? "Bluetooth paused, reboot to resume" :
-  (default_settings_used==STG_EEPROM? "Warning: reverted to EEPROM settings" :
-    "Restored user settings on boot")))),
+  (settings_used==STG_EEPROM? "Old user settings read from EEPROM" :
+    "Restored user settings from file on boot")))),
   (settings->mode == SOFTRF_MODE_NORMAL ? "selected" : "") , SOFTRF_MODE_NORMAL,
   (settings->mode == SOFTRF_MODE_MORENMEA ? "selected" : "") , SOFTRF_MODE_MORENMEA,
   (settings->mode == SOFTRF_MODE_GPSBRIDGE ? "selected" : ""), SOFTRF_MODE_GPSBRIDGE,
@@ -1542,13 +1578,7 @@ void handleSettings() {
   Serial.print(F("Settings page size: ")); Serial.print(offset-Settings_temp);
   Serial.print(F(" out of allocated: ")); Serial.println(totalsize);
   // currently about 12800
-
-  SoC->swSer_enableRx(false);
-  server.sendHeader(String(F("Cache-Control")), String(F("no-cache, no-store, must-revalidate")));
-  server.sendHeader(String(F("Pragma")), String(F("no-cache")));
-  server.sendHeader(String(F("Expires")), String(F("-1")));
-  server.send ( 200, "text/html", Settings_temp );
-  SoC->swSer_enableRx(true);
+  serve_html(Settings_temp);
   Serial.print(F("Free memory (settings page staging): "));
   Serial.println(ESP.getFreeHeap());
   free(Settings_temp);
@@ -1682,6 +1712,15 @@ void handleRoot() {
    <td><input type=button onClick=\"location.href='/settingsswap'\" value='Restore/Swap'></td>\
   </tr>\
  </table>\
+ %s\
+ <hr>\
+ Alarm Log:\
+ <table width=100%%>\
+  <tr>\
+   <td><input type=button onClick=\"location.href='/alarmlog'\" value='Download'></td>\
+   <td><input type=button onClick=\"location.href='/clearlog'\" value='Clear'></td>\
+  </tr>\
+ </table>\
  <hr>\
  <table width=100%%>\
   <tr>\
@@ -1693,25 +1732,16 @@ void handleRoot() {
    <td><input type=button onClick=\"location.href='/format'\" value='Clear ALL files from SPIFFS'></td>\
   </tr>\
  </table>\
- <hr>\
- Alarm Log:\
- <table width=100%%>\
-  <tr>\
-   <td><input type=button onClick=\"location.href='/alarmlog'\" value='Download'></td>\
-   <td><input type=button onClick=\"location.href='/clearlog'\" value='Clear'></td>\
-  </tr>\
- </table>\
- %s\
 </body>\
 </html>"),
     ((settings->debug_flags & DEBUG_SIMULATE)?
        "<tr><td align=center><h4>(Warning: simulation mode (debug flag 20))</h4></td></tr>" :
-    (default_settings_used==STG_DEFAULT ?
+    (settings_used==STG_DEFAULT ?
        "<tr><td align=center><h4>(Warning: reverted to default settings)</h4></td></tr>" :
     (BTpaused ?
        "<tr><td align=center><h4>(Bluetooth paused, reboot to resume)</h4></td></tr>" :
-    (default_settings_used==STG_EEPROM ?
-       "<tr><td align=center><h4>(Warning: reverted to EEPROM settings)</h4></td></tr>" : "")))),
+    (settings_used==STG_EEPROM ?
+       "<tr><td align=center><h4>(Old settings read from EEPROM)</h4></td></tr>" : "")))),
     (SoC->getChipId() & 0x00FFFFFF), ThisAircraft.addr, SOFTRF_FIRMWARE_VERSION,
     (SoC == NULL ? "NONE" : SoC->name),
     GNSS_name[hw_info.gnss],
@@ -1736,14 +1766,12 @@ void handleRoot() {
   <input type=button onClick=\"location.href='/gps_reset'\" value='Reset GNSS'>\
  </td></tr>"
           : ""),
-    num_wav_files,
-#if defined(USE_EGM96)
- "<td><input type=button onClick=\"location.href='/egmupload'\" value='Upload egm96s.dem'></td>",
-#else
- "",
-#endif
 #if defined(USE_SD_CARD)
-(SDfileOpen?
+(PSRAMbuf?
+   (PSRAMbufUsed?
+   "<hr><input type=button onClick=\"location.href='/flightlog'\" value='Download Flight Log'>"
+   : "<hr>No flight log in PSRAM yet")
+ : (SD_is_mounted?
  "<hr>\
  Flight Logs:\
  <table width=100%%>\
@@ -1753,7 +1781,17 @@ void handleRoot() {
    <td><input type=button onClick=\"location.href='/clearlogs'\" value='Clear'></td>\
    <td><input type=button onClick=\"location.href='/clearoldlogs'\" value='Empty trash'></td>\
   </tr>\
- </table>" : "")
+ </table>" : "")),
+#else
+ (PSRAMbuf?
+   (PSRAMbufUsed?
+   "<hr><input type=button onClick=\"location.href='/flightlog'\" value='Download Flight Log'>"
+   : "<hr>No flight log in PSRAM yet")
+ : ""),
+#endif
+    num_wav_files,
+#if defined(USE_EGM96)
+ "<td><input type=button onClick=\"location.href='/egmupload'\" value='Upload egm96s.dem'></td>"
 #else
  ""
 #endif
@@ -1761,12 +1799,7 @@ void handleRoot() {
   Serial.print(F("Status page size: ")); Serial.print(strlen(Root_temp));
   Serial.print(F(" out of allocated: ")); Serial.println(size);
   // currently about 2900
-  SoC->swSer_enableRx(false);
-  server.sendHeader(String(F("Cache-Control")), String(F("no-cache, no-store, must-revalidate")));
-  server.sendHeader(String(F("Pragma")), String(F("no-cache")));
-  server.sendHeader(String(F("Expires")), String(F("-1")));
-  server.send ( 200, "text/html", Root_temp );
-  SoC->swSer_enableRx(true);
+  serve_html(Root_temp);
   free(Root_temp);
   Serial.println(F("Files in SPIFFS:"));
 //  if (!SPIFFS.begin(true)) {
@@ -1822,178 +1855,21 @@ void handleInput() {
         char q[32];
         server.argName(i).toCharArray(p, sizeof(p));
         server.arg(i).toCharArray(q, sizeof(q));
-        for (int i=STG_MODE; i<STG_END; i++) {
-            if (try_match_setting(p, q, i))
-                break;
-        }
-        if (i == STG_END) {
-            Serial.print(p);
-            Serial.print(",");
-            Serial.print(q);
-            Serial.println("  - invalid");
-        }
+        Serial.print(p);
+        Serial.print(",");
+        Serial.print(q);
+        int i = find_setting(p);
+        if (i == STG_NONE)
+            Serial.print("  - no matching label");
+        if (load_setting(i,q) == false)
+            Serial.print("  - error");
+        Serial.println("");
     }
     yield();
   }                // end for (server.args())
 
-  /* enforce some restrictions on input and output routes */
-  int nmea1 = settings->nmea_out;
-  int nmea2 = settings->nmea_out2;
-  Serial.print(F("NMEA_Output1 (given) = ")); Serial.println(nmea1);
-  Serial.print(F("NMEA_Output2 (given) = ")); Serial.println(nmea2);
-  if (hw_info.model == SOFTRF_MODEL_PRIME_MK2) {
-    if (nmea1==DEST_USB)    nmea1==DEST_UART;
-    if (nmea2==DEST_USB)    nmea2==DEST_UART;   // same thing
-  }
-  if (nmea2 == nmea1)    nmea2 = DEST_NONE;
-  if (settings->gdl90_in == DEST_UDP) {
-      if (settings->gdl90 == DEST_UDP) {
-          settings->gdl90 = DEST_NONE;
-          Serial.println(F("GDL input from UDP, GDL output turned OFF"));
-      }
-  }
-//  bool wireless1 = (nmea1==DEST_UDP || nmea1==DEST_TCP || nmea1==DEST_BLUETOOTH);
-//  bool wireless2 = (nmea2==DEST_UDP || nmea2==DEST_TCP || nmea2==DEST_BLUETOOTH);
-  bool wifi1 = (nmea1==DEST_UDP || nmea1==DEST_TCP);
-  bool wifi2 = (nmea2==DEST_UDP || nmea2==DEST_TCP);
-// >>> try and allow Bluetooth along with WiFi:
-//  if (wifi1 && nmea2==DEST_BLUETOOTH)
-//        nmea2 = DEST_NONE;      // only one wireless output type possible
-//  if (wifi2 && nmea1==DEST_BLUETOOTH)
-//        nmea2 = DEST_NONE;
-  Serial.print(F("NMEA_Output1 (adjusted) = ")); Serial.println(nmea1);
-  settings->nmea_out  = nmea1;
-  Serial.print(F("NMEA_Output2 (adjusted) = ")); Serial.println(nmea2);
-  settings->nmea_out2 = nmea2;
-  //if (nmea1==DEST_BLUETOOTH || nmea2==DEST_BLUETOOTH
-  //      || settings->d1090 == DEST_BLUETOOTH || settings->gdl90 == DEST_BLUETOOTH) {
-  //    if (settings->bluetooth == BLUETOOTH_OFF)
-  //        settings->bluetooth = BLUETOOTH_SPP;
-  //}
-#if !defined(EXCLUDE_D1090)
-  if (nmea1 != DEST_BLUETOOTH && nmea2 != DEST_BLUETOOTH
-          && settings->d1090 != DEST_BLUETOOTH && settings->gdl90 != DEST_BLUETOOTH) {
-      settings->bluetooth = BLUETOOTH_OFF;
-  }
-#else
-  if (nmea1 != DEST_BLUETOOTH && nmea2 != DEST_BLUETOOTH && settings->gdl90 != DEST_BLUETOOTH) {
-      settings->bluetooth = BLUETOOTH_OFF;
-  }
-#endif
-  Serial.print(F("Bluetooth (adjusted) = ")); Serial.println(settings->bluetooth);
-
-  /* enforce some hardware limitations (not enough GPIO pins) */
-  if (hw_info.model == SOFTRF_MODEL_PRIME_MK2) {
-
-      if (hw_info.revision < 8) {
-          if (settings->voice == VOICE_EXT) {
-              // pin 14 not available, cannot do external I2S
-              settings->voice = VOICE_OFF;
-          }
-          if (settings->baudrate2 != BAUD_DEFAULT) {
-              // aux serial uses VP, cannot use it for main serial rx
-              settings->altpin0 = false;
-              if (settings->gnss_pins == EXT_GNSS_15_14)
-                  settings->ppswire = false;
-          }
-          if (settings->gnss_pins == EXT_GNSS_39_4) {
-              // GNSS uses VP, cannot use it for main serial rx
-              settings->altpin0 = false;
-              if (settings->voice != VOICE_OFF || settings->strobe != STROBE_OFF)
-                  settings->ppswire = false;
-              if (settings->sd_card == SD_CARD_13_25) {
-                  settings->ppswire = false;
-              }
-          }
-          if (settings->gnss_pins == EXT_GNSS_15_14) {
-              // pin 25 is used for GNSS on v0.7 (rather than 15)
-              settings->voice = VOICE_OFF;
-              settings->strobe = STROBE_OFF;
-              //if (settings->sd_card == SD_CARD_13_VP) {    // now uses 4 instead of VP
-              //    settings->ppswire = false;
-              //}
-              if (settings->sd_card == SD_CARD_13_25) {
-                  settings->sd_card = SD_CARD_NONE;
-                  settings->gnss_pins = EXT_GNSS_NONE;  // don't know what's wired
-                  settings->ppswire = false;
-              }
-          }
-          if (settings->gnss_pins == EXT_GNSS_13_2) {
-              if (settings->sd_card == SD_CARD_13_25 || settings->sd_card == SD_CARD_13_VP) {
-                  settings->sd_card = SD_CARD_NONE;
-                  settings->gnss_pins = EXT_GNSS_NONE;  // don't know what's wired
-              }
-              settings->ppswire = false;
-          }
-          if (settings->sd_card == SD_CARD_13_VP) {    // now uses 4 instead of VP
-              if (settings->gnss_pins == EXT_GNSS_39_4 || settings->gnss_pins == EXT_GNSS_13_2) {
-                  settings->sd_card = SD_CARD_NONE;
-                  settings->gnss_pins = EXT_GNSS_NONE;
-              }
-              //if (settings->gnss_pins != EXT_GNSS_NONE)
-              //    settings->ppswire = false;
-          }
-          if (settings->ppswire && settings->gnss_pins == EXT_GNSS_15_14)
-              settings->altpin0 = false;
-          //if (settings->gnss_pins == EXT_GNSS_39_4)   // already done above
-          //    settings->altpin0 = false;
-          if (settings->rx1090 != ADSB_RX_NONE)
-              settings->altpin0 = false;
-      } else {    // T-Beam v1.x
-          //if (settings->gnss_pins == EXT_GNSS_NONE || settings->sd_card == SD_CARD_13_VP)
-          if (settings->gnss_pins == EXT_GNSS_NONE)
-              settings->ppswire = false;
-          if (settings->ppswire)
-              settings->altpin0 = false;
-          if (settings->gnss_pins == EXT_GNSS_13_2) {
-              if (settings->sd_card == SD_CARD_13_25 || settings->sd_card == SD_CARD_13_VP) {
-                  settings->sd_card = SD_CARD_NONE;
-                  settings->gnss_pins = EXT_GNSS_NONE;  // don't know what's wired
-              }
-          }
-      }
-      if (settings->gnss_pins == EXT_GNSS_39_4) {
-          settings->baudrate2 = BAUD_DEFAULT;       // meaning disabled
-          settings->rx1090    = ADSB_RX_NONE;
-      }
-      if (settings->gnss_pins == EXT_GNSS_15_14) {
-          settings->volume = BUZZER_OFF;
-          if (settings->voice == VOICE_EXT)
-              settings->voice = VOICE_OFF;
-      }
-      if (settings->sd_card == SD_CARD_13_25) {
-          settings->voice = VOICE_OFF;
-          settings->strobe = STROBE_OFF;
-      }
-      if (settings->rx1090 != ADSB_RX_NONE) {
-          // dedicate Serial2 to the ADS-B receiver module
-          settings->baudrate2 = BAUD_DEFAULT;       // will actually use 921600
-          settings->invert2 = false;
-          if (settings->nmea_out  == DEST_UART2)
-              settings->nmea_out   = DEST_NONE;
-          if (settings->nmea_out2 == DEST_UART2)
-              settings->nmea_out2  = DEST_NONE;
-          if (settings->gdl90     == DEST_UART2)
-              settings->gdl90      = DEST_NONE;
-          if (settings->gdl90_in  == DEST_UART2)
-              settings->gdl90_in   = DEST_NONE;
-          if (settings->d1090     == DEST_UART2)
-              settings->d1090      = DEST_NONE;
-      }
-      if (settings->voice == VOICE_EXT) {
-          settings->volume = BUZZER_OFF;  // free up pins 14 & 15 for I2S use
-      }
-  } else {
-      settings->voice = VOICE_OFF;
-  }
-
-  /* if winch mode, use full transmission power */
-  if (settings->acft_type == AIRCRAFT_TYPE_WINCH && settings->txpower == RF_TX_POWER_LOW)
-      settings->txpower == RF_TX_POWER_FULL;
-
-  // if SSID but no password, copy ssid to myssid, it is for AP mode
-  if (settings->ssid[0] != '\0' && settings->psk[0] == '\0')
-      strcpy(settings->myssid, settings->ssid);
+  // make some adjustments to settings
+  Adjust_Settings();
 
 #if 0
   /* (do not) show new settings in a web page before rebooting */
@@ -2097,12 +1973,23 @@ PSTR("<html>\
     (settings->igc_key[3]? 0x88888888 : 0)
         /* do not show the existing secret key */
     );
-    server.send (200, "text/html", Input_temp );
+    serve_html(Input_temp);
     delay(1000);
     free(Input_temp);
   }
 #endif
-  settingsreboot();
+
+  if (SPIFFS.exists("/settingb.txt"))
+      SPIFFS.remove("/settingb.txt");
+  SPIFFS.rename("/settings.txt","/settingb.txt");
+  save_settings_to_file();   // this also shows the new settings
+  if (! SPIFFS.exists("/settings.txt")) {   // saving the file failed
+      SPIFFS.rename("/settingb.txt","/settings.txt");
+      server.send (500, texthtml,
+        "<html><p align=center><h3 align=center>cannot save the new settings file</h3></p></html>");
+      return;
+  }
+  settingsreboot(200, "New settings saved.");
 }
 
 void handleNotFound() {
@@ -2129,28 +2016,24 @@ bool handleFileRead(String path) { // send the requested file to the client (if 
     return false;
   if (! path.startsWith("/"))
     path = "/" + path;
-  char buf[40];
   //size_t slash = path.find_last_of("/");
   //slash = ((slash == std::string::npos)? 0 : slash+1);
   // - can't seem to make that compile, so roll our own:
-  const char *cp = path.c_str();
-  int slash = strlen(cp);
+  const char *filename = path.c_str();
+  int slash = strlen(filename);
   while (slash > 0) {
-      if (cp[slash-1] == '/')
+      if (filename[slash-1] == '/')
           break;
       --slash;
   }
-  cp += slash;    // point to after the last slash
-  snprintf(buf, 40, "attachment; filename=%s", cp);
-  String contentType = "application/octet-stream";
-  if (SPIFFS.exists(path)) {                               // If the file exists
-    File file = SPIFFS.open(path, FILE_READ);              // Open the file
+  filename += slash;    // point to after the last slash
+  // look in SPIFFS first
+  if (SPIFFS.exists(path)) {
+    File file = SPIFFS.open(path, FILE_READ);
     if (file) {
-      server.sendHeader("Content-Type", contentType);
-      server.sendHeader("Content-Disposition", buf);
-      server.sendHeader("Connection", "close");
-      size_t sent = server.streamFile(file, contentType);    // Send it to the client
-      file.close();
+        serve_file(file, filename);
+        delay(500);
+        file.close();
     }
     Serial.println(String(F("\tSent file: SPIFFS")) + path);
     return true;
@@ -2160,11 +2043,9 @@ bool handleFileRead(String path) { // send the requested file to the client (if 
   if (SD.exists(path)) {
     File file = SD.open(path, FILE_READ);
     if (file) {
-      server.sendHeader("Content-Type", contentType);
-      server.sendHeader("Content-Disposition", buf);
-      server.sendHeader("Connection", "close");
-      size_t sent = server.streamFile(file, contentType);
-      file.close();
+        serve_file(file, filename);
+        delay(500);
+        file.close();
     }
     Serial.println(String(F("\tSent file: SD")) + path);
     return true;
@@ -2195,13 +2076,13 @@ void handleListLogs()
   File root = SD.open("/logs");
   if (! root) {
       Serial.println(F("Cannot open SD/logs"));
-      server.send ( 200, "text/html", "(cannot open SD/logs)");
+      server.send ( 500, textplain, "(cannot open SD/logs)");
       return;
   }
   char *filelist = (char *) malloc(FILELSTSIZ);
   if (! filelist) {
       Serial.println(F("cannot allocate memory for file list"));
-      server.send ( 200, "text/html", "(cannot allocate memory for file list)");
+      server.send ( 500, textplain, "(cannot allocate memory for file list)");
       root.close();
       return;
   }
@@ -2247,7 +2128,7 @@ void handleListLogs()
   }
   file.close();
   root.close();
-  server.send ( 200, "text/html", filelist);
+  serve_html(filelist);
   free(filelist);
 }
 
@@ -2268,10 +2149,10 @@ bool handleFlightLogs(bool trash)
     if (! root) {
         if (trash) {
             Serial.println(F("Cannot open SD/logs/old"));
-            server.send ( 200, "text/html", "(cannot open SD/logs/old)");
+            server.send ( 500, textplain, "(cannot open SD/logs/old)");
         } else {
             Serial.println(F("Cannot open SD/logs"));
-            server.send ( 200, "text/html", "(cannot open SD/logs)");
+            server.send ( 500, textplain, "(cannot open SD/logs)");
         }
         return false;
     }
@@ -2335,10 +2216,14 @@ bool handleFlightLogs(bool trash)
         yield();
     }
     free(filelist);
+
+
     if (trash)
-        server.send ( 200, "text/html", "old flight logs deleted");
+        server.send ( 200, texthtml,
+        "<html><p align=center><h3 align=center>old flight logs deleted</h3></p></html>");
     else
-        server.send ( 200, "text/html", "flight logs cleared");
+        server.send ( 200, texthtml,
+        "<html><p align=center><h3 align=center>flight logs cleared</h3></p></html>");
     return leftover;
 }
 
@@ -2360,16 +2245,6 @@ void handleClearOldLogs()
 
 #endif   // SD_CARD
 
-void serve_P_html(const char *html)
-{
-    SoC->swSer_enableRx(false);
-    server.sendHeader(String(F("Cache-Control")), String(F("no-cache, no-store, must-revalidate")));
-    server.sendHeader(String(F("Pragma")), String(F("no-cache")));
-    server.sendHeader(String(F("Expires")), String(F("-1")));
-    server.send_P ( 200, PSTR("text/html"), html);
-    SoC->swSer_enableRx(true);
-}
-
 void Web_setup()
 {
   server.on ( "/", handleRoot );
@@ -2378,13 +2253,14 @@ void Web_setup()
 
   server.on ( "/reboot", []() {
     Serial.println(F("Rebooting from web page..."));
-    server.send(200, textplain, "Rebooting...");
-    delay(600);
-    reboot();
+    //server.send(200, textplain, "Rebooting...");
+    //delay(600);
+    //reboot();
+    settingsreboot(200, "");
   } );
 
   server.on ( "/about", []() {
-    serve_P_html(about_html);
+    serve_html(about_html);
   } );
 
   server.on ( "/show", []() {
@@ -2396,7 +2272,8 @@ void Web_setup()
   server.on ( "/landed_out", []() {
     landed_out_mode = true;
     OLED_msg("LANDED", "OUT");
-    server.send(200, textplain, "LANDED-OUT MODE STARTED");
+    server.send(200, texthtml,
+      "<html><p align=center><h3 align=center>LANDED-OUT MODE ACTIVATED</h3></p></html>");
   } );
 
   server.on ( "/testmode", []() {
@@ -2416,41 +2293,13 @@ void Web_setup()
   server.on ( "/gps_reset", []() {
     Serial.println(F("Factory Reset GNSS..."));
     gnss_needs_reset = true;
-    server.send(200, textplain, "Factory reset & cold-start GNSS...");
+    server.send(200, texthtml,
+      "<html><p align=center><h3 align=center>Factory reset & cold-start GNSS...</h3></p></html>");
     //delay(4000);
     //Serial.println(F("Rebooting..."));
     //delay(2000);
     //reboot();
   } );
-
-  server.on ( "/wavupload", []() {
-    serve_P_html(wav_upload_html);
-  } );
-
-  server.on ("/dowavupld", HTTP_POST,  // if the client posts to the upload page
-    [](){ server.send(200); },        // Send 200 to tell the client we are ready to receive
-    wavUpload                         // Receive and save the file
-  );
-
-  server.on ( "/egmupload", []() {
-    serve_P_html(egm96_upload_html);
-  } );
-
-  server.on ("/doegmupld", HTTP_POST,  // if the client posts to the upload page
-    [](){ server.send(200); },        // Send 200 to tell the client we are ready to receive
-    egmUpload                         // Receive and save the file
-  );
-
-#if defined(USE_SD_CARD)
-  server.on ( "/logupload", []() {
-    serve_P_html(log_upload_html);
-  } );
-
-  server.on ("/dologupld", HTTP_POST,  // if the client posts to the upload page
-    [](){ server.send(200); },        // Send 200 to tell the client we are ready to receive
-    logUpload                         // Receive and save the file
-  );
-#endif
 
   server.on ( "/format", []() {
     clear_waves();
@@ -2459,13 +2308,47 @@ void Web_setup()
     server.send(200, textplain, "SPIFFS cleared");
   } );
 
+  server.on ( "/wavupload", []() {
+    char buf[300];
+    set_upload(buf, "waves.tar (read instructions first)", "/dowavupld");
+  } );
+  server.on ("/dowavupld", HTTP_POST,  // if the client posts to the upload page
+    [](){ server.send(200); },         // Send 200 to tell the client we are ready to receive
+    wavUpload                          // Receive and save the file
+  );
+
+  server.on ( "/egmupload", []() {
+    char buf[300];
+    set_upload(buf, "egm96s.dem", "/doegmupld");
+    serve_html(buf);
+  } );
+  server.on ("/doegmupld", HTTP_POST,  // if the client posts to the upload page
+    [](){ server.send(200); },         // Send 200 to tell the client we are ready to receive
+    egmUpload                          // Receive and save the file
+  );
+
+#if defined(USE_SD_CARD)
+  server.on ( "/logupload", []() {
+    char buf[300];
+    set_upload(buf, "a file into SD/logs", "/dologupld");
+    serve_html(buf);
+  } );
+  server.on ("/dologupld", HTTP_POST,  // if the client posts to the upload page
+    [](){ server.send(200); },         // Send 200 to tell the client we are ready to receive
+    logUpload                          // Receive and save the file
+  );
+#endif
+
   server.on ( "/settingsupload", []() {
-    serve_P_html(settings_upload_html);
+    char buf[300];
+    set_upload(buf, "settings.txt", "/dostgupld");
+    serve_html(buf);
   } );
   server.on ("/dostgupld", HTTP_POST,  // if the client posts to the upload page
     [](){ server.send(200); },        // Send 200 to tell the client we are ready to receive
     settingsupload                    // Receive and save the file
   );
+
   server.on ( "/settingsdownload", settingsdownload );
   server.on ( "/settingsbackup",   settingsbackup );
   server.on ( "/settingsswap",     settingsswap );
@@ -2483,9 +2366,9 @@ void Web_setup()
     server.send(200, textplain, "Alarm Log cleared");
   } );
 
+  server.on ( "/flightlog", flightlogfile );
 #if defined(USE_SD_CARD)
   server.on ( "/listlogs", handleListLogs );
-  server.on ( "/flightlog", flightlogfile );
   server.on ( "/clearlogs", handleClearLogs );
   server.on ( "/clearoldlogs", handleClearOldLogs );
 #endif
@@ -2535,11 +2418,17 @@ void Web_setup()
   server.on ("/update", HTTP_POST, [](){
     SoC->swSer_enableRx(false);
 #if defined(USE_SD_CARD)
-    closeFlightLog();
+    closeFlightLog();     // OTA while PSRAM logging will lose the log
 #endif /* USE_SD_CARD */
     server.sendHeader(String(F("Connection")), String(F("close")));
     server.sendHeader(String(F("Access-Control-Allow-Origin")), "*");
-    server.send(200, textplain, (Update.hasError())?"UPDATE FAILED":"UPDATE DONE, REBOOTING");
+    //server.send(200, textplain, (Update.hasError())?"UPDATE FAILED":"UPDATE DONE, REBOOTING");
+    if (Update.hasError())
+      server.send(200, texthtml,
+        "<html><p align=center><h3 align=center>UPDATE FAILED</h3></p></html>");
+    else
+      server.send(200, texthtml,
+        "<html><p align=center><h3 align=center>UPDATE DONE, REBOOTING...</h3></p></html>");
 //    SoC->swSer_enableRx(true);
     Buzzer_fini();
     Voice_fini();

@@ -23,7 +23,7 @@ float atan2_approx(float, float);
 float sin_approx(float);
 float cos_approx(float);
 float approxHypotenuse(float, float);
-float CosLat(float);
+float CosLat(void);
 float InvCosLat(void);
 
 int32_t iatan2_approx( int32_t ns, int32_t ew );

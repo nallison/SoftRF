@@ -27,6 +27,7 @@ void show_zone_stats(void);
 
 void gns5892_test_mode(void);
 
+extern bool gns5892_found;
 extern uint32_t adsb_packets_counter;
 
 #endif /* GNS5892_H */

@@ -25,7 +25,7 @@
 #include "../driver/EPD.h"
 #include "../TrafficHelper.h"
 #include "../driver/Battery.h"
-#include "../driver/EEPROM.h"
+#include "../driver/Settings.h"
 #include "../driver/RF.h"
 #include "../driver/GNSS.h"
 #include <protocol.h>

@@ -1,6 +1,6 @@
 /*
  * Platform_RPi.h
- * Copyright (C) 2018-2021 Linar Yusupov
+ * Copyright (C) 2018-2022 Linar Yusupov
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,6 +21,8 @@
 #ifndef PLATFORM_RPI_H
 #define PLATFORM_RPI_H
 
+#define USE_JSON_SETTINGS
+
 /* Maximum of tracked flying objects is now SoC-specific constant */
 #define MAX_TRACKING_OBJECTS  8
 
@@ -32,7 +34,8 @@
 #include "JSON.h"
 
 #define SerialOutput          Serial
-#define swSer                 Serial1
+#define Serial_GNSS_In        Serial1
+#define Serial_GNSS_Out       Serial_GNSS_In
 #define UATSerial             Serial2
 
 #define isValidFix()          (isValidGNSSFix() || isValidGPSDFix())
@@ -67,6 +70,8 @@ struct rst_info {
 #define SOC_GPIO_PIN_SS       6
 #define SOC_GPIO_PIN_RST      0
 #define SOC_GPIO_PIN_DIO0     7
+
+#define SOC_GPIO_PIN_GNSS_PPS SOC_UNUSED_PIN // 1 /* rev. 1.4 only */
 #else /* BCM */
 
 #if defined(USE_SPI1)
@@ -84,9 +89,10 @@ struct rst_info {
 #define SOC_GPIO_PIN_RST      RPI_V2_GPIO_P1_11 // Reset on GPIO17 so P1 connector pin #11
 #define SOC_GPIO_PIN_DIO0     RPI_V2_GPIO_P1_07 // IRQ on GPIO4 so P1 connector pin #7
 #endif
+
+#define SOC_GPIO_PIN_GNSS_PPS SOC_UNUSED_PIN // RPI_V2_GPIO_P1_12 /* rev. 1.4 */
 #endif /* GPIO */
 
-#define SOC_GPIO_PIN_GNSS_PPS SOC_UNUSED_PIN
 #define SOC_GPIO_PIN_LED      SOC_UNUSED_PIN
 #define SOC_GPIO_PIN_STATUS   SOC_UNUSED_PIN
 
@@ -124,7 +130,9 @@ extern const char *Hardware_Rev[];
 #define EXCLUDE_MPL3115A2
 //#define EXCLUDE_MAVLINK
 
+//#define USE_TIME_SLOTS
 //#define USE_OGN_ENCRYPTION
+//#define ENABLE_D1090_INPUT
 
 //#define USE_OGN_RF_DRIVER
 //#define WITH_RFM95
@@ -133,11 +141,7 @@ extern const char *Hardware_Rev[];
 //#define WITH_SI4X32
 
 #if defined(USE_EPAPER)
-#include <GxEPD2_BW.h>
-
 typedef void* EPD_Task_t;
-
-extern GxEPD2_BW<GxEPD2_270, GxEPD2_270::HEIGHT> *display;
 #endif /* USE_EPAPER */
 
 #endif /* PLATFORM_RPI_H */

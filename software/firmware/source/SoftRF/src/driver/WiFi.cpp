@@ -30,7 +30,7 @@ void WiFi_fini()    {}
 #include "../../SoftRF.h"
 #include "../system/OTA.h"
 #include "GNSS.h"
-#include "EEPROM.h"
+#include "Settings.h"
 #include "WiFi.h"
 #include "tcpip_adapter.h"
 #include "../TrafficHelper.h"

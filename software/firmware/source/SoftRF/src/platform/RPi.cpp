@@ -45,7 +45,7 @@
 #if defined(RASPBERRY_PI)
 
 #include "../system/SoC.h"
-#include "../driver/EEPROM.h"
+#include "../driver/Settings.h"
 #include <TinyGPS++.h>
 #if !defined(EXCLUDE_MAVLINK)
 #include <aircraft.h>

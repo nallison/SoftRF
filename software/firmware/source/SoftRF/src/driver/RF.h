@@ -134,6 +134,7 @@ extern bool (*protocol_decode)(void *, container_t *, ufo_t *);
 extern const char *Protocol_ID[];
 extern uint16_t RF_last_crc;
 extern int8_t RF_last_rssi;
+extern int8_t which_rx_try;
 
 extern const rf_proto_desc_t legacy_proto_desc;
 

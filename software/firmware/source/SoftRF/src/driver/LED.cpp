@@ -22,7 +22,7 @@
 
 #include "LED.h"
 #include "Battery.h"
-#include "EEPROM.h"
+#include "Settings.h"
 #include "Buzzer.h"
 #include "../TrafficHelper.h"
 

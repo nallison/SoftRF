@@ -18,16 +18,16 @@
 
 #include "system/SoC.h"
 #include "TrafficHelper.h"
+#include "ApproxMath.h"
+#include "Wind.h"
+#include "driver/Settings.h"
+#include "driver/GNSS.h"
+#include "driver/RF.h"
+#include "driver/Filesys.h"
 #include "protocol/radio/Legacy.h"
 #include "protocol/data/NMEA.h"
 #include "protocol/data/IGC.h"
 #include "protocol/data/GNS5892.h"
-#include "ApproxMath.h"
-#include "Wind.h"
-#include "driver/EEPROM.h"
-#include "driver/GNSS.h"
-#include "driver/RF.h"
-#include "driver/SDcard.h"
 
 float wind_best_ns = 0.0;  /* mps */
 float wind_best_ew = 0.0;
@@ -375,7 +375,7 @@ FlightLogComment(NMEABuffer);
   if (ew) {
     float new_lon = ThisAircraft.longitude;
     if (old_lon_time != 0) {
-      drift_ew = 111300.0 * (new_lon - old_lon) * CosLat(ThisAircraft.latitude); /* how far further East */
+      drift_ew = 111300.0 * (new_lon - old_lon) * CosLat(/*ThisAircraft.latitude*/); /* how far further East */
       if (abs(drift_ew) > 300)  drift_ew = 0;
       interval = 0.001 * (gnsstime_ms - old_lon_time);
       wind_ew = drift_ew / interval;
@@ -559,17 +559,17 @@ void this_airborne()
     if (ThisAircraft.airborne==0 && airborne>0) {
       airborne_changed = true;
       AirborneTime = RF_time;
-#if defined(ESP32)
+//#if defined(ESP32)
       startlogs();      // restart alarm log (and flight log) on first takeoff after boot
-#endif
+//#endif
     } else if (ThisAircraft.airborne==1 && airborne<=0) {
       airborne_changed = true;
       AirborneTime = 0;
 #if defined(ESP32)
       if (settings->rx1090)
           save_zone_stats();  // do this first as it will append comments to IGC file
-      stoplogs();             // close the alarm log and flight log after landing
 #endif
+      stoplogs();             // close the alarm log and flight log after landing
     }
 
     ThisAircraft.airborne = (airborne > 0)? 1 : 0;

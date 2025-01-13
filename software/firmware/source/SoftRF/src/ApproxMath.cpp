@@ -242,16 +242,20 @@ uint32_t iapproxHypotenuse0( int32_t x, int32_t y )
 /* Once computed, accurate enough through a significant range of latitude. */
 
 static float cos_lat = 0.7071;
+//static float cos_lat_m = 111300.0 * 0.7071;
 static float inv_cos_lat = 1.4142;
 
-float CosLat(float latitude)
+float CosLat()
 {
   static float oldlat = 45.0;
+  float latitude = ThisAircraft.latitude;
   if (fabs(latitude-oldlat) > 0.3) {
     cos_lat = cos_approx(latitude);
     if (cos_lat > 0.01)
         inv_cos_lat = 1.0 / cos_lat;
     oldlat = latitude;
+Serial.print("cos_lat = ");
+Serial.println(cos_lat);
   }
   return cos_lat;
 }

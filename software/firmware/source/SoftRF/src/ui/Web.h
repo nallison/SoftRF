@@ -27,7 +27,7 @@
 
 #include <TinyGPS++.h>
 
-#include "../driver/EEPROM.h"
+#include "../driver/Settings.h"
 #include "../driver/RF.h"
 
 #define BOOL_STR(x) (x ? "true":"false")

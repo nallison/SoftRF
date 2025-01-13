@@ -1,9 +1,9 @@
-Preliminary Documentation for Moshe Braner's version of SoftRF
-==============================================================
+Basic Documentation for Moshe Braner's version of SoftRF
+========================================================
 
 By Moshe Braner
 
-This version last updated December 17, 2024 to fit software version MB150
+This version last updated January 10, 2025 to fit software version MB153
 The latest version of this document is always here:
   https://github.com/moshe-braner/SoftRF/blob/master/software/firmware/documentation
 Discussion group:
@@ -35,7 +35,7 @@ The more advanced PowerFLARM units can listen to FLARM signals via two antennas 
 
 What can my version of SoftRF do that the mainline version cannot?
 
-My version can now receive and transmit in the new FLARM protocol (V7) that went into effect in March 2024.  My version also fixes some radio protocol bugs, making interoperability with FLARM more reliable.  My version correctly transmits the curved path of the aircraft (if circling) so that FLARM units receiving the data can predict collisions accordingly.  My version also receives and interprets the curved path of other aircraft as sent by FLARM units, and predicts collisions based on that.  And it does so even when the aircraft are subject to significant wind drift.  My version also offers built-in audible collision warnings in 3 levels of urgency, similar to what PowerFLARM Portable does.  My version also offers some conveniences, such as assigning an ID to this aircraft, and specifying other IDs to ignore or to follow.  And also an option to add an SD card adapter and save IGC flight log files to it.
+My version can now receive and transmit in the new FLARM protocol (V7) that went into effect in March 2024.  My version also fixes some radio protocol bugs, making interoperability with FLARM more reliable.  My version correctly transmits the curved path of the aircraft (if circling) so that FLARM units receiving the data can predict collisions accordingly.  My version also receives and interprets the curved path of other aircraft as sent by FLARM units, and predicts collisions based on that.  And it does so even when the aircraft are subject to significant wind drift.  My version also offers built-in audible collision warnings in 3 levels of urgency, similar to what PowerFLARM Portable does.  My version also offers some conveniences, such as assigning an ID to this aircraft, and specifying other IDs to ignore or to follow.  And now also an option to record IGC flight log files.
 
 What can the mainline version of SoftRF do that my version cannot?
 
@@ -130,16 +130,17 @@ After several weeks in the apparently "off" mode, the battery installed in a T-B
 
 Turning the device on and off
 
-To turn on the T-Beam, press and hold the button closest to the USB jack for about 2 seconds.  Once LEDs and/or the OLED display light up, can let go of the button.  To turn off the T-Beam, press and hold the button closest to the USB jack until the OLED display says "OFF" - shutdown will be complete when the dim red LED turns off.  The middle button is usually not used (but see below), and the third button is a reset button.  After booting, the first button serves to switch between pages on the OLED display.  (On the old T-Beam v0.7 use the slide switch to turn it on and off.)
+To turn on the T-Beam, press and hold the button closest to the USB jack for about 2 seconds.  Once LEDs and/or the OLED display light up, can let go of the button.  To turn off the T-Beam, press and hold the button closest to the USB jack until the OLED display says "OFF" (and the buzzer, if attached, makes a hi-lo sound).  Shutdown will be complete when the dim red LED turns off.  The middle button is usually not used (but see below), and the third button is a reset button.  (On the old T-Beam v0.7 use the slide switch to turn it on and off.)  After booting, the first button serves to switch between pages on the OLED display.
 
-The Power Management Unit (PMU) on the T-Beam is always active.  The on/off button just sends instructions to the PMU.  The PMU can turn the power to individual parts of the board (e.g., the CPU, or the GNSS module) on or off.  There are 3 LEDs on the board.  The bright blue LED near the PMU is controlled by the PMU (with indirect instructions from the CPU).  The dim red LED near it signifies that the CPU is powered.  The red LED near the GNSS module, when blinking, is indicating that the GNSS module has a "fix", i.e., is receiving signals from enough satellites.  If either, or the blue LED, are lit, the board is not as close to "off" as it can be.
+The Power Management Unit (PMU) on the T-Beam (v1.x) is always active.  The first pushbutton just sends instructions to the PMU.  The PMU can turn the power to individual parts of the board (e.g., the CPU, or the GNSS module) on or off.  There are 3 LEDs on the board.  The bright blue LED near the PMU is controlled by the PMU (with indirect instructions from the CPU).  The red LED near it signifies that the CPU is powered.  The red LED near the GNSS module, when blinking, is indicating that the GNSS module has a "fix", i.e., is receiving signals from enough satellites.  If any LED is lit, the board is not as close to "off" as it can be.
 
 If a battery is installed on the board, the T-Beam is never completely turned "off".  Always remove the battery from the holder before soldering anything to the board.
 
-After booting, SoftRF waits for the GNSS module to determine its location.  On a T-Beam (v1.x) the blue LED blinks rapidly (4 times per second) until a "fix" is achieved, at which point the GNSS red LED starts blinking slowly (once per second).  One can also see the number of satellites on the OLED display.  After that, if transmissions are off the blue LED is off.  If on, it stays lit, unless the battery voltage is low, in which case it blinks slowly.
+After booting, SoftRF waits for the GNSS module to determine its location.  On a T-Beam (v1.x) the blue LED blinks rapidly (4 times per second) until a "fix" is achieved, at which point the GNSS red LED starts blinking slowly (once per second).  One can also see the number of satellites on the OLED display.  After that, if transmissions are off the blue LED is off.  If transmissions are on, the blue LED stays lit, unless the battery voltage is low, in which case it blinks slowly.
 
-The T-Echo has a Reset button and a Mode button.  Pressing the first, or pressing and holding the second, turns it on.  To turn it off, press and hold the Mode button.  Press the Mode button briefly to cycle through several screens.  Some of the screens only show "NO FIX" if a GNSS fix is not yet available.  The last screen (added in my version) shows most of the SoftRF settings - see below about changing the settings.  Find more info about operating the T-Echo ("Badge Edition") here:
-https://github.com/lyusupov/SoftRF/wiki/Badge-Edition
+The T-Echo has a Reset button and a Mode button on the side, along with a touch pad on top.  Pressing either the Reset button or the Mode button turns it on.  To turn it off, press and hold the Mode button.  Press the Mode button briefly to cycle through several screens.  Some of the screens only show "NO FIX" if a GNSS fix is not yet available.  The last screen (added in my version) shows some of the SoftRF settings - see below about changing the settings.  Find more info about operating the T-Echo ("Badge Edition") here:
+    https://github.com/lyusupov/SoftRF/wiki/Badge-Edition
+Note that in this version of SoftRF, if you touch and hold the touch pad, for 2 seconds, the display will show "SCREEN SAVER" and then go blank, but the device will keep operating.  Click the Mode button to activate the display again.  If you press and hold and then release the Mode button while touching the pad, the T-Echo will turn off in "screen saver" mode.
 
 FLARM does not generate collision warnings while it is not airborne.  My version of SoftRF follows that rule.  But to allow testing on the ground, my version does give such warnings - and sends signals out pretending to be airborne - for one minute after it is has booted and has acquired a GNSS fix.  If a strobe is connected, it will fire during the first 9 seconds, despite not being airborne, for testing.
 
@@ -165,9 +166,9 @@ The Web Interface (T-Beam only)
 
 After startup, SoftRF on a T-Beam tries to connect to the WiFi network specified in the settings (if both an SSID and a password were specified).  If a connection is not successful (in 10 seconds), it creates its own Wifi network.  Use a computer, tablet, or smartphone to connect to the network.  If using an ambient network, connect to it as normal.  Otherwise, the network SoftRF creates is named SoftRF-xxxxxx where xxxxxx is the device id.  The device ID may differ from the aircraft ID shown on the OLED - check the fourth (or fifth) page on the OLED for the SSID.  Alternatively, if an SSID is specified in the settings, but with a blank password, that SSID is used for the created network.  Either way, the password is 12345678.  Your phone or computer may complain that there is no internet access with this network, that is correct, allow it.  Then open a web browser and point it to the IP address 192.168.1.1 if using the network created by SoftRF.  If using an ambient network, check the fourth (or fifth) page on the OLED for the IP address assigned to the SoftRF device by the network - click the button to progress through the pages.  With the right IP address, the browser will connect to the mini web server built into SoftRF, allowing one to view SoftRF status info, see whether the user settings have been restored, change settings, or update the firmware via WiFi.  This feature is NOT available on the T-Echo since it does not support WiFi.
 
-After connecting to the web interface, the root page seen is the SoftRF Status page.  It shows some information, and offers buttons for launching several operations, such as viewing and changing settings, firmware update, downloading flight logs (if equipped with an SD card), etc.
+After connecting to the web interface, the root page seen is the SoftRF Status page.  It shows some information, and offers buttons for launching several operations, such as viewing and changing settings, firmware update, downloading flight logs, etc.
 
-Note that when Bluetooth is active, the web interface cannot function (due to not enough memory).  The currently implemented workaround is that, if memory space is low, web access automatically turns Bluetooth off (until you reboot).  If you still cannot get to the status page, one way to recover is via a USB (or BT) terminal and Settings2.html (see the next section).  Another way (on a T-Beam v1.0, v1.1 or v1.2) is to long-press the middle button - that turns Bluetooth off (until you reboot).  Wait until the T-Beam fully boots, then long-press the middle button (OLED will say "BT OFF"), and only then try and access the web page.  Note that after selecting landed-out mode (as mentioned above) BT will be turned off (due to the web access) - rebooting will restore BT but will exit landed-out mode.
+Note that when Bluetooth is active, the web interface may not function (due to not enough memory).  The currently implemented workaround is that, if memory space is low, web access automatically turns Bluetooth off (until you reboot).  If you still cannot get to the status page, one way to recover is via a USB (or BT) terminal and Settings2.html (see the next section).  Another way (on a T-Beam v1.0, v1.1 or v1.2) is to long-press the middle button - that turns Bluetooth off (until you reboot).  Wait until the T-Beam fully boots, then long-press the middle button (OLED will say "BT OFF"), and only then try and access the web page.  Note that after selecting landed-out mode (as mentioned above) BT will be turned off (due to the web access) - rebooting will restore BT but will exit landed-out mode.
 
 
 Choosing the operational settings
@@ -176,19 +177,23 @@ Once the firmware is installed, before actual use in an aircraft, one must choos
 
 On the T-Beam, connect to the SoftRF status web page as described above.  Then click the "Settings" button at the lower left.  A new web page will load, where you can view and change the settings.  Once you have selected the settings you want, scroll to the bottom of the web page and click "Save".  A new page will show the saved settings (in a not-friendly format) and then the device will reboot.  Once it is done rebooting, re-connect to the SoftRF WiFi network, go to the Settings page again, and double-check that your chosen settings are indeed in effect.
 
-If the existing settings are from the immediately preceding version, then for convenience most of them are carried over, instead of reverting to the defaults.  But do check all the settings.  And then click "save", even if you did not change anything, to keep the carried-over settings for future firmware updates.
+If the existing settings are from a recent similar-enough version, then for convenience most of them are carried over, instead of reverting to the defaults.  But do check all the settings.  And then click "save", even if you did not change anything, to keep the carried-over settings for future firmware updates.
+
+Starting with version MB151, the settings are stored in a text file called "settings.txt" in the file system embedded into the flash memory of the device.  Buttons in the web interface allow downloading the file for backup elsewhere, uploading the file (possibly after manual editing), backing up the file to a copy within the flash memory, and swapping the current file with such a copy.
 
 On the T-Echo, adjusting the settings is more difficult.  An Android app is available that can display and change the basic settings, see here: https://github.com/lyusupov/SoftRF/wiki/SoftRF-Configuration-Tool
-But that tool does not offer the "Legacy" alarm trigger method as a choice.  And it does not know about the additional settings in my version that are absent from the mainline version of SoftRF, e.g., setting the aircraft ID.
+But that tool does not offer the "Latest" alarm trigger method as a choice.  And it does not know about the additional settings in my version that are absent from the mainline version of SoftRF, e.g., setting the aircraft ID.
 
 A second method is to connect the T-Echo (or T-Beam, for that matter) via a USB cable to a computer with has a "terminal" program that can access the USB port as if it was a serial port.  Alternatively, use a Bluetooth terminal app.  In a web browser, open up one of the HTML files from this folder: https://github.com/moshe-braner/SoftRF/tree/master/software/app/Settings - the settings1 file for the basic settings, and the settings2 file for the additional settings.  In these open HTML pages, one can select the settings in the browser.  When done, be sure to click somewhere outside the input field last changed.  The cryptic $PSRF... line of text at the bottom will change.  Copy that line, and paste it into the terminal program so that it will be sent to the T-Echo (or T-Beam).  This will cause the device to reboot with the new settings.
 
 Because these methods of adjusting the settings on the T-Echo are not easy, I've added a third method of adjusting some of the settings in the T-Echo, within the device, using the display & buttons.  See instructions later in this document in the section "settings displayed, and adjusted, within the T-Echo".
 
+Additionally, starting with version MB152, the settings are stored in a "settings.txt" file, and one can edit the file.  After connecting the T-Echo to a computer via USB and opening it as a "drive", one can access that file from the computer.  To prepare the file space so that SoftRF can then create the settings file, may first need to connect the T-Echo to a PC, format that "drive" (as "FAT"), then disconnect and restart SoftRF.  Also, now one can (by editing the "logflight" setting in the file) set the T-Echo to create IGC flight logs within its flash memory - see the section below titled "Flight logging".
+
 
 Description of the settings:
 
-Mode: normally select "Normal".  The "More NMEA" mode (T-Beam only) adds some NMEA sentence types to the GNSS output, to work better with Stratux and SkyDemon.  GNSS Bridge mode lets one communicate with the GNSS module directly from the USB port, for diagnostics (e.g., using the Ublox U-Center program).  On the T-Echo, can enter this mode via NMEA config, escape this mode with a double-click.  On the T-Beam can exit this mode (or any mode other than "Normal" and "More NMEA") via clicking the middle button, switching to Normal mode.  (Long-press the first button on T-Beam v0.7.)
+Mode: normally select "Normal".  The "More NMEA" mode adds some NMEA sentence types to the GNSS output, to work better with Stratux and SkyDemon.  GNSS Bridge mode lets one communicate with the GNSS module directly from the USB port, for diagnostics (e.g., using the Ublox U-Center program).  On the T-Echo, can enter this mode via NMEA config, escape this mode with a double-click.  On the T-Beam can exit this mode (or any mode other than "Normal" and "More NMEA") via clicking the middle button, switching to Normal mode.  (Long-press the first button on T-Beam v0.7.)
 
 Device ID: this is unique to each device.  You cannot change it.  The first hex digit is always set to "4", to avoid duplication of a FLARM device ID.
 
@@ -206,9 +211,9 @@ Region: you must choose your geographical region, otherwise the radio will be on
 
 Aircraft type: E.g., glider, powered plane, etc.  This is important for collision avoidance and situational awareness, and also for OGN tracking.  This version of SoftRF added the aircraft type "winch", see the relevant section below.
 
-Alarm trigger: this setting chooses an algorithm to base collision warnings on.  Recommended: "Legacy" (unique to my version), which mimics what FLARM does, predicting near-future paths of circling aircraft.  If neither aircraft is circling, this algorithm will automatically revert to the "Vector" method, which extrapolates straight lines.  And if movement is not determined, that (in my version) will revert to "Distance", which warns simply by the distance between the aircraft.  Thus, if you select "Legacy", then ALL the algorithms are used as appropriate.  If you select "None" then you will not get collision warnings.  Note: there is no "Latest" alarm algorithm, use "Legacy" here even when using the "Latest" radio protocol.
+Alarm trigger: this setting chooses an algorithm to base collision warnings on.  Recommended: "Latest" (unique to my version), which mimics what FLARM does, predicting near-future paths of circling aircraft.  If neither aircraft is circling, this algorithm will automatically revert to the "Vector" method, which extrapolates straight lines.  And if movement is not determined, that (in my version) will revert to "Distance", which warns simply by the distance between the aircraft.  Thus, if you select "Legacy", then ALL the algorithms are used as appropriate.  If you select "None" then you will not get collision warnings.  Note: there is no "Latest" alarm algorithm, use "Legacy" here even when using the "Latest" radio protocol.
 
-Tx Power: transmitter power.  Normally use "Full" (which is less then a tenth of a watt).  Use "Low" (2 mw) for short-range testing, and "Off" if you want to see but not be seen - appropriate when running SoftRF on the ground just to see where other aircraft are.  If you are flying, and want to limit visibility to other aircraft while retaining collision avoidance, use "Stealth mode" instead - see below.
+Tx Power: transmitter power.  Normally use "Full" (which is a tenth of a watt or less, depending on the regional legal limit).  Use "Low" (2 mw) for short-range testing, and "Off" if you want to see but not be seen - appropriate when running SoftRF on the ground just to see where other aircraft are.  If you are flying, and want to limit visibility to other aircraft while retaining collision avoidance, use full power and activate "Stealth mode" instead - see below.
 
 Volume: if a piezo buzzer is attached to the board for audible collision warnings, choose "Loud" here.  (It is not quite loud enough.)  If you get audible warnings via a connected device, e.g., XCsoar, then you can set the buzzer Volume to Low or Off.
 
@@ -230,11 +235,11 @@ Host IP (if TCP client): Enter IP address, e.g., 192.168.4.1 - only affects TCP 
 
 Host port (if TCP client): Choose the port to which the TCP client connects to, either 2000 (default) or 8880 (option for stock XCvario firmware).  The current version (MB09r or later) allows both TCP and UDP to be used at the same time (as primary and secondary NMEA data destinations).  The purpose is to connect wirelessly to XCvario (and XCsoar at the same time).
 
-WiFi (optional): after booting, SoftRF will try and connect to the external WiFi network, if specified.  If unsuccessful after 10 seconds, it will create its own WiFi network.  If the external network name (SSID) is left blank it will skip that 10-second delay and create the internal network immediately (with the default password - the entered one is ignored).  If the password is left blank, but the SSID is not blank, the entered SSID is used as a custom name for the network created by SoftRF.  In the case of an external network, the IP address for the web interface can be seen in the third OLED page (press the pushbutton to change pages).  For an internal network it is always 192.168.1.1.
+WiFi (optional): after booting, SoftRF will try and connect to the external WiFi network, if specified.  If unsuccessful after 10 seconds, it will create its own WiFi network.  If the external network name (SSID) is left blank it will skip that 10-second delay and create the internal network immediately (with the default password - the entered one is ignored).  If the password is made blank, but the SSID is not blank, the entered SSID is used as a custom name for the network created by SoftRF.  In the case of an external network, the IP address for the web interface can be seen in the third OLED page (press the pushbutton to change pages).  For an internal network it is always 192.168.1.1.
 
 NMEA output: this selects the method by which the data is sent out: Off (no data sent out), Serial (via the on-board serial interface, which also appears on the USB port), the auxiliary serial interface (T-Beam only), UDP (WiFi), TCP (another WiFi method), or Bluetooth.
 
-NMEA sentences: Data is sent to connected devices via text "sentences" in the NMEA format.  You can turn on or off each of the following types of sentences:  GNSS (position data), Private (SoftRF debugging, leave off), Legacy (traffic data in the same format used by FLARM), Sensors (e.g., barometric sensor, if you attach such to the board), Debug (debugging of my SoftRF version, leave off), and (new, see "data bridging") External, meaning data arriving from external devices via other ports will be forwarded to this output port.
+NMEA sentences: Data is sent to connected devices via text "sentences" in the NMEA format.  You can turn on or off each of the following types of sentences:  GNSS (position data), Sensors (e.g., barometric sensor, if you attach such to the board), Traffic (traffic data, in the same format used by FLARM), and External, meaning data arriving from external devices via other ports will be forwarded to this output port (see "data bridging").
 
 NMEA secondary output: two output routes are allowed simultaneously, e.g., Bluetooth and USB.  Or, UDP and TCP.  Note: Bluetooth is not allowed at the same time as another wireless option (UDP or TCP).
 
@@ -280,9 +285,9 @@ Added PPS wire: normally leave as "absent".  The "present" option serves two pur
 
 SD card adapter: If such an adapter is added to a T-Beam (see How to connect external devices section below), change this setting from "none" to the one that lists the pins used for the connection.
 
-Flight logging: This setting gives the options to write data to a flight log.  Which can only actually happen if an SD card is attached.  See the section about "connecting an SD card adapter".
+Flight logging: This setting gives the options to write data to a flight log.  "Airborne" means logging will automatically start on takeoff and stop after landing.  "Traffic" also outputs data about nearby aircraft as comments in the flight log file.  The interval, in seconds, between recorded fixes is settable, default is 4 seconds.  See the "Flight Logging" section for more details.
 
-Alarms Log: If enabled, every time a traffic alarm is issued (whether audible or not), a line of text is written into the alarmlog.txt file. This line includes the date, time, lat/lon, alarm level (1-3), aircraft ID, relative heading, and horizontal and vertical separation (in meters).  If you want to download this data, use the web interface and click the "Alarm Log: [Download]" button at the bottom of the status page.  The existing file is normally appended to.  If space in the flash file system is low, the log file is erased and a new one created when SoftRF is first airborne following a power-up or reboot.  You can also do that manually by clicking the "Alarm Log: [Clear]" button on the status page.
+Alarms Log: If enabled, every time a traffic alarm is issued (whether audible or not), a line of text is written into the alarmlog.txt file. (If flight logging, similar data is also inserted as an LPLT comment.)  This line includes the date, time, lat/lon, alarm level (1-3), aircraft ID, relative heading, and horizontal and vertical separation (in meters).  If you want to download this data, use the web interface and click the "Alarm Log: [Download]" button at the bottom of the status page.  The existing file is normally appended to.  If space in the flash file system is low, the log file is erased and a new one created when SoftRF is first airborne following a power-up or reboot.  You can also do that manually by clicking the "Alarm Log: [Clear]" button on the status page.
 
 IGC encryption key:  Only shown if SoftRF is set to use the OGNTP protocol. The key is divided into 4 sections, each is 8 hexadecimal digits.  For each section separately, if it's zero, it is shown as "00000000", otherwise as "88888888", masking the true key.  If left as "88888888" then the current key is left intact.  Overwrite with something else to change it.  If set to all zeros then no encryption is done.
 
@@ -325,8 +330,140 @@ The settings accessible via this method are:
 * Relay mode: None, Landed.
 * Display units: Metric, Imperial, Mixed.
 * Display orientation: Track Up, North Up.
-* New: aircraft ID and ID type (tedious).
-Other than the aircraft ID, settings that require typing are not adjustable this way, sorry.  Use a Bluetooth or USB terminal app and the HTML files mentioned above.
+* Aircraft ID (tedious) and ID type.
+Other settings are not adjustable this way.  Edit the settings.txt file SoftRF creates in the file space that appears when you connect the T-Echo to a PC via USB.  Or, can use a Bluetooth or USB terminal app and the HTML files mentioned above.
+
+
+About the settings file
+
+This fork of SoftRF now (from version MB151) stores the settings in a text file within the flash memory of the device, instead of an "EEPROM" binary block.  The first time the new version boots, it reads the existing settings from the "EEPROM" and copies them to the file.  After that, it will get the settings from the file, and ignore the EEPROM, unless the file is invalid or missing.  If the file is invalid it will be automatically deleted. (Check the serial output for which line was invalid.)  It is best to click the "download" button and save a copy of the file in your phone or computer, then you can restore it (or an edited version of it) by clicking "upload".
+
+The settings file must be named "settings.txt" for upload.  Uploading does not change the settings currently in effect, until SoftRF is rebooted.  So, for example, in the web interface you can click "backup" (which copies settings.txt into settingb.txt), then upload an alternative settings.txt file, then click "swap".  It will reboot with the same settings as before - but another "swap" will reboot with the alternative settings.
+
+The settings file is plain text, label,value pairs, one per line.  The labels must be exactly as generated by the software - capitalization matters.  Anything after a space is a comment - some are added automatically and can add some manually, e.g., "band,2  # US/CA".  A "SoftRF,1" line must be included, but otherwise settings not mentioned in the file are set to their defaults.  Here are the codes used for a few important settings:
+
+mode:
+0	Normal
+9	GPS Bridge
+10	More NMEA
+
+protocol
+0	Legacy   /* Air V6 */
+1	OGNTP
+2	P3I      /* PilotAware */
+5	FANET    /* Skytraxx */
+7	Latest   /* new 2024 V7 protocol */
+
+band
+1	EU     /* 868.2 MHz band */
+2	US     /* 915 MHz band */
+3	AU     /* 921 MHz band */
+4	NZ     /* 869.250 MHz band */
+5	RU     /* 868.8 MHz band */
+6	CN     /* 470 MHz band */
+7	UK     /* treated as EU, unless FANET */
+8	IN     /* 866.0 MHz band */
+9	IL     /* 916.2 MHz band */
+10	KR     /* 920.9 MHz band */
+
+acft_type
+0	unknown     // marks as landed-out glider for relay purpose
+1	glider
+2	towplane
+3	helicopter
+4	parachute
+5	dropplane
+6	hangglider
+7	paraglider
+8	powered
+15	static
+16	winch      // transmitted as static with variable altitude
+
+id_method
+0	random
+1	ICAO
+2	device
+3	anonymous
+
+txpower
+0	full
+1	low
+2	off
+
+volume (buzzer)
+0	off
+1	low
+2	full
+3	external (active buzzer)
+
+nmea_out and nmea_out2
+0	none
+1	main serial
+2	UDP
+3	TCP
+4	USB (same as main serial)
+5	Bluetooth
+6	aux serial
+
+baud_rate and baudrate2
+0	default (38400 for main serial, OFF for aux serial)
+1	4800
+2	9600
+3	19200
+4	38400
+5	57600
+6	115200
+
+bluetooth    (T-Beam only, T-Echo always uses BLE)
+0	off
+1	classic (SPP)
+2	BLE
+
+relay
+0	off
+1	landed,
+2	ads-b,
+3	relay-only
+
+logflight
+0	none
+1	always
+2	airborne
+3	also record close traffic
+
+Many settings use 0 for "no" and 1 for "yes", e.g., stealth, no_track, alarmlog.
+
+And the for T-Echo display:
+
+units
+0	metric
+1	imperial
+2	mixed   - almost same as metric, but altitudes in feet
+
+zoom
+0	lowest
+1	low
+2	medium
+3	high
+
+rotate
+0	0 deg
+1	90 deg
+2	180 deg
+3	270 deg
+
+epdidpref
+0	registration
+1	tail number
+2	make and model
+3	type
+
+antighost
+0	off
+1	auto
+2	2min
+3	5min
+4	10min
 
 
 Collision alarms
@@ -401,20 +538,34 @@ Connecting an SD card adapter
 
 Finally, a micro-SD card adapter can also be connected to the T-Beam.  SD adapters connect via "SPI".  This requires 4 GPIO pins (plus power and ground) and thus is likely get in the way of connecting other devices.  See the "Interacting_Options" file (above) for the matrix of interactions.  The pin choices are: 13,25,2,0 or 13,VP,2,0 or 5,19,27,0 - the latter being the pins used by the radio module (see below).  (Pins are a bit different for the older v0.7 T-Beam.)   The pins for the SD adapter are listed in the order: SCK, MISO, MOSI, SS/CS.  See below for types of adapters and the needed modifications.
 
-Once the adapter is connected, prepare a micro-SD card.  The card must be 32 GB or smaller (1GB is plenty), formatted FAT32.  To reduce the wear on the SD card from re-writing the same sectors, it is best to format with a small "allocation size" of 1024 bytes (or 512 or 2048).  Create two folders at the top level: "firmware" and "logs".  In the "firmware" folder you can put a firmware update file (renamed the generic name SoftRF.bin), and then when SoftRF boots it will update the firmware - and delete that file.  In the "logs" folder put a small text file called IGC_CONF.TXT holding 4 pieces of data, one per line: pilot name, aircraft type (model), aircraft registration ID, and contest (tail) ID.  When SoftRf will create IGC flight log files, this information will be embedded into those files.  Example such file contents:
+Once the adapter is connected, prepare a micro-SD card.  The card must be 32 GB or smaller (1GB is plenty), formatted FAT32.  To reduce the wear on the SD card from re-writing the same sectors, it is best to format with a small "allocation size" of 1024 bytes (or 512 or 2048).  Create two folders at the top level: "firmware" and "logs".  In the "firmware" folder you can put a firmware update file (renamed the generic name SoftRF.bin), and then when SoftRF boots it will update the firmware - and delete that file.
 
-Chuck Yeager
-ASW20
-N1234
-CY
+Once the card is installed, you will normally not need to physically access it (other than for firmware updates via the card, but those can normally be done via wifi instead).  The web interface allows you to list the flight logs (which are kept in the "logs" folder), download the latest flight log or any file in the list, and to clear the flight logs to keep the list uncluttered.  (Clearing moves them to an "old" subfolder, click "empty trash" to delete all files in the subfolder.)
 
-Once the card is installed, you will normally not need to physically access it (other than for firmware updates, but those can normally be done via wifi instead).  The web interface allows you to list the flight logs (which are kept in the "logs" folder), download the latest flight log or any file in the list, and to clear the flight logs to keep the list uncluttered.  (Clearing moves them to an "old" subfolder, click "empty trash" to delete all files in the subfolder.)  To upload an updated IGC_CONF.TXT to the SD card through the web interface, enter the URL 192.168.1.1/logupload and then select the file and click "upload".
+Flight logging
 
-Flight logging can be done in two different modes.  In the "Airborne" mode the file is started when a takeoff is detected, and finalized upon landing - a new file is created upon the next takeoff.  In the "Always" mode data is collected continuously into one file.  The "Traffic" mode is same as "Airborne" but also outputs data about nearby aircraft as comments in the flight log file.
+The T-Beam's flash memory has very little space avaiable for flight logging.  Flight logging on the T-Beam can be done into the volatile RAM memory space (PSRAM).  Or, logging can be done to an SD card if one is attached - see the section about "connecting an SD card adapter" for details on that option.  Logging to RAM is limited to 3.5 megabytes, and only a single combined log file between starting up SoftRF and shutting it down.  Most importantly, the RAM is volatile, so the log file must be downloaded (through the web interface to your phone or computer) before turning off or restarting the T-Beam.
 
-If the T-Beam is shut down via the pushbutton (on v1.x boards - or if the alarm-demo is activated on a v0.7 board via long-press of the button), or if any of the related web-interface buttons are clicked, the flight log (if still active) will be finalized.  If the power supply is simply disconnected, the flight log will be valid, but missing the last few minutes of data.
+A new option in this version of SoftRF is to also archive the flight log in a compressed format into the flash memory, as long as there is space.  This needs to be enabled in the "log2flash" setting.  The space available depends on what else is stored there (e.g., voice files), but can be about 12 hours of flight recording at an interval of 4 seconds.  The log files in flash memory persist even when the power is turned off.
 
-The flight log files are "secured" and will be accepted as valid on Weglide and OLC.  But they are not IGC-certified, so cannot be used for badges and records.
+Similarly, on the T-Echo flight logging can be done within the nonvolatile flash memory of the device.  These files are not compressed.  The space for flight logs on the T-Echo is limited to about 2 megabytes - which is enough for about 12 hours of flight recording at one fix every second.  If there is not enough free space for 3 hours of logging (at the chosen logging interval), a log will not be started.  So it is best to select "airborne" logging and a less-frequent logging interval, and to download the flight logs and clear that space periodically between flights.  Also, you have to choose whether to use the space mostly for flight logging, or mostly for the optional aircraft database, as explained here:
+    https://github.com/lyusupov/SoftRF/wiki/Badge-Edition.-Aircrafts-database
+
+Note that the number of times flash memory can be re-written is limited.  After about 2000 hours of logging at 4 second intervals there is some possibility of the flash memory starting to fail.  For most users this is not a problem.
+
+The logging destination, SD vs. RAM (+ optionally flash), on a T-Beam is determined automatically by whether an SD file system is "mounted".  The status web page will show buttons as appropriate.  If logging is to RAM then only one button will appear: "download flight log".  Or just text saying "no flight log yet".  With SD or flash logging there will be buttons to list the saved logs, clear them, etc.
+
+Before creating flight logs, be sure to enter your chosen pilot name, aircraft type (model), aircraft registration ID, and callsign (contest/tail ID) into the corresponding fields in the SoftRF settings.  (This can be done by downloading the settings.txt file, editing it, and uploading.)  This information will be embedded into the IGC flight log files SoftRf will create.
+
+To download the flight log(s) from the T-Beam use the "download" or "list" buttons in the flight logs section of the web page.  On the T-Echo, connect to a computer via USB, and a files window will open.  Download files by dragging them out of there.  Note that SoftRF on a T-Echo cannot write files (flight logs or settings) to the files area while it is connected to a computer.
+
+Flight logging can be done in two different modes.  In the "Airborne" mode the file is started when a takeoff is detected, and finalized upon landing - a new file is created upon the next takeoff.  In the "Always" mode data is collected continuously into one file.  "Traffic" mode is same as "Airborne" but also outputs data about nearby aircraft as comments in the flight log file.  If the "log alarms" setting is enabled, data about alarm traffic is output to the flight log even if not in "traffic" mode.
+
+When logging to an SD card or to flash memory, if the T-Beam is shut down via a long-press of the pushbutton (on v1.x boards - or if the alarm-demo is activated on a v0.7 board via long-press of the button), or if any of the related buttons in the web-interface status page are clicked, the flight log (if still active) will be finalized.  If the power supply is simply disconnected, the flight log will be valid, but may be missing the last few minutes of data.
+
+If the T-Echo is shut down via a long press of the Mode button, the flight log (if still active) will be finalized and remain in the flash memory.  If you connect the T-Echo to a computer via USB, additional flight logging may be blocked.  To ensure the flight log is complete (as of that moment), click the Mode button before connecting to a computer.  SoftRF will switch to another display page as normal, but also will silently finalize the flight log.
+
+The flight log files are "secured" (have G-records appended), and will be accepted as valid on Weglide and OLC.  But they are not IGC-certified, so cannot be used for badges and records.
 
 Types of SD card adapters
 
@@ -524,12 +675,14 @@ The T-Echo usually includes a "bootloader" which makes it easy to update the fir
 * Download an appropriate version of SoftRF firmware, from here:
 https://github.com/moshe-braner/SoftRF/tree/master/software/firmware/binaries/nRF52840/SoftRF/MassStorage
 * Unzip the file and make sure you now have a .uf2 file.
-* Connect the SoftRF Badge Edition device to your PC by means of a USB cable (Type-A <-> Type-C)
+* Connect the SoftRF Badge Edition (T-Echo) device to your PC by means of a USB cable (Type-A <-> Type-C)
+* Open it up as a mass storage device (flash drive).
+* Delete any large file(s) there (such as flight logs) - the firmware update process may (?) need the space.
+* Eject the drive to finalize the file deletion (but leave the cable connected).
 * Double click (two clicks within 0.5 seconds) the RESET button on the T-Echo.
-* A virtual disk with NRF52BOOT (or TECHOBOOT) label should appear in your "File manager".
-* Drag the .uf2 firmware file by your pointing device (mouse, touchpad,...) and drop it into the window showing the NRF52BOOT (or TECHOBOOT) virtual disk.
-* Wait until the file transfer is complete.  The window contents will disappear and the T-Echo will reboot itself.
-Note that this "virtual disk" is not really a disk.  You will never see the dragged-and-dropped file stored on it.
+* A virtual mass storage device labeled NRF52BOOT (or TECHOBOOT) will appear in your computer.
+* Drag the .uf2 firmware file by your pointing device (mouse, touchpad,...) and drop it into the window showing the NRF52BOOT (or TECHOBOOT) virtual drive contents.
+* Wait until the file transfer is complete, it takes about 30 seconds.  The window will disappear and the T-Echo will reboot itself.
 
 See similar instructions here:
 https://github.com/lyusupov/SoftRF/blob/master/software/firmware/binaries/README.md#nrf52840

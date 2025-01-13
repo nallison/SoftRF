@@ -1,9 +1,9 @@
-#ifndef SDCARD_H
-#define SDCARD_H
+#ifndef FILESYS_H
+#define FILESYS_H
+
+#include "../system/SoC.h"
 
 #if defined(ESP32)
-
-char *getline(File file, char *buf, int limit);
 
 #if defined(USE_SD_CARD)
 
@@ -28,11 +28,11 @@ char *getline(File file, char *buf, int limit);
 #define SD3_MOSI    27
 #define SD3_SS       0
 
-void SD_setup();
 void SD_log(const char * message);
 void closeSDlog();
 
-extern bool SDfileOpen;
+extern bool SD_is_mounted;
+extern bool SDlogOpen;
 extern File SIMfile;
 extern File TARGETfile;
 extern bool SIMfileOpen;
@@ -40,6 +40,27 @@ extern bool TARGETfileOpen;
 
 #endif // USE_SD_CARD
 
+#define FILESYS SPIFFS
+#define FS_is_mounted SPIFFS_is_mounted
+#define IGCFILESYS SD
+#define IGCFS_is_mounted SD_is_mounted
+
 #endif // ESP32
 
-#endif // SDCARD_H
+#if defined(ARDUINO_ARCH_NRF52)
+
+#define FILESYS fatfs
+#define FS_is_mounted FATFS_is_mounted
+#define IGCFILESYS fatfs
+#define IGCFS_is_mounted FATFS_is_mounted
+
+#endif
+
+void Filesys_setup();
+
+bool getline(File &infile, char *buf, int limit);
+
+uint32_t FILESYS_free_kb();    // on SPIFFS (T-Beam) or FATFS (T-Echo)
+uint32_t IGCFS_free_kb();      // on SD (T-Beam) or FATFS (T-Echo)
+
+#endif // FILESYS_H

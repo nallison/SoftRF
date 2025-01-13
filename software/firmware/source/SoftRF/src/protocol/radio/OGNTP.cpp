@@ -25,7 +25,7 @@
 
 #include "../../../SoftRF.h"
 #include "../../driver/RF.h"
-#include "../../driver/EEPROM.h"
+#include "../../driver/Settings.h"
 
 const rf_proto_desc_t ogntp_proto_desc = {
   "OGNTP",

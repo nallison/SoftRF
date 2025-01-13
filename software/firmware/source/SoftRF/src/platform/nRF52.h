@@ -25,6 +25,7 @@
 
 #include <avr/dtostrf.h>
 #include <pcf8563.h>
+#include <Adafruit_SPIFlash.h>
 
 /* Maximum of tracked flying objects is now SoC-specific constant */
 #define MAX_TRACKING_OBJECTS    8
@@ -97,6 +98,8 @@ struct rst_info {
   uint32_t excvaddr;
   uint32_t depc;
 };
+
+//extern struct rst_info reset_info;   // use SoC->getResetInfoPtr() instead
 
 #define VBAT_MV_PER_LSB       (0.73242188F)   // 3.0V ADC range and 12-bit ADC resolution = 3000mV/4096
 #define SOC_ADC_VOLTAGE_DIV   (2.0F)          // 100K + 100K voltage divider on VBAT
@@ -253,7 +256,7 @@ struct rst_info {
 #define EXCLUDE_WIFI
 #define EXCLUDE_CC13XX
 //#define EXCLUDE_TEST_MODE
-#define EXCLUDE_SOFTRF_HEARTBEAT
+//#define EXCLUDE_SOFTRF_HEARTBEAT
 //#define EXCLUDE_LK8EX1
 
 #define EXCLUDE_GNSS_UBLOX
@@ -285,6 +288,7 @@ struct rst_info {
 #define USE_EPAPER                 //  +    kb
 #define USE_EPD_TASK
 #define USE_TIME_SLOTS
+//#define USE_JSON_SETTINGS
 
 /* Experimental */
 //#define USE_WEBUSB_SERIAL
@@ -329,6 +333,9 @@ extern const char *nRF52_Device_Manufacturer, *nRF52_Device_Model, *Hardware_Rev
 #if defined(USE_EPAPER)
 typedef void EPD_Task_t;
 #endif /* USE_EPAPER */
+
+extern FatFileSystem fatfs;
+extern bool FATFS_is_mounted;
 
 #endif /* PLATFORM_NRF52_H */
 

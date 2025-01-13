@@ -23,7 +23,7 @@
 #include "RF.h"
 #include "../system/Time.h"
 #include "../system/SoC.h"
-#include "EEPROM.h"
+#include "Settings.h"
 #include "Battery.h"
 #include "../ui/Web.h"
 #if !defined(EXCLUDE_MAVLINK)
@@ -48,6 +48,7 @@ byte TxBuffer[MAX_PKT_SIZE] __attribute__((aligned(sizeof(uint32_t))));
 uint32_t tx_packets_counter = 0;
 uint32_t rx_packets_counter = 0;
 
+int8_t which_rx_try = 0;
 int8_t RF_last_rssi = 0;
 uint16_t RF_last_crc = 0;
 
@@ -535,6 +536,13 @@ void RF_loop()
 //RF_current_chan, RF_current_slot, ms_since_pps, TxTimeMarker, TxEndMarker, RF_OK_until);
 }
 
+bool RF_Transmit_Ready()
+{
+    if (! TxEndMarker)  return true;   // for other protocols
+    uint32_t now_ms = millis();
+    return (now_ms >= TxTimeMarker && now_ms < TxEndMarker);
+}
+
 size_t RF_Encode(container_t *fop)
 {
   size_t size = 0;
@@ -548,8 +556,7 @@ size_t RF_Encode(container_t *fop)
     if (settings->rf_protocol == RF_PROTOCOL_LEGACY ||
         settings->rf_protocol == RF_PROTOCOL_LATEST ||
         settings->rf_protocol == RF_PROTOCOL_OGNTP) {
-      uint32_t now_ms = millis();
-      if (now_ms >= TxTimeMarker && now_ms < TxEndMarker) {
+      if (RF_Transmit_Ready()) {
         size = (*protocol_encode)((void *) &TxBuffer[0], fop); 
       }
     } else {
@@ -559,13 +566,6 @@ size_t RF_Encode(container_t *fop)
     }
   }
   return size;
-}
-
-bool RF_Transmit_Ready()
-{
-    if (! TxEndMarker)  return true;   // for other protocols
-    uint32_t now_ms = millis();
-    return (now_ms >= TxTimeMarker && now_ms < TxEndMarker);
 }
 
 bool RF_Transmit(size_t size, bool wait)

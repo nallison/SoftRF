@@ -3,7 +3,7 @@ Preliminary Documentation for Moshe Braner's version of SoftRF
 
 By Moshe Braner
 
-This version last updated December 17, 2024 to fit software version MB150
+This version last updated January 3, 2025 to fit software version MB152
 
 
 PART 1: USER GUIDE - see separate document
@@ -145,17 +145,9 @@ T-Echo settings via e-paper screen
 
 Added ability to adjust some settings within the device, using the EPD & buttons.  New file: Change_Settings_EPD.cpp  Also modified: Conf_EPD.cpp and nRF52.cpp etc.
 
-Moved settings-via-NMEA code
-
-From GNSS.cpp to NMEA.cpp, following what was done in the mainline.
-
 Second NMEA output destination
 
 Allow two NMEA output route simultaneously.  For example, BT & USB.  Also allow selection of sentence types to output via each route independently.  Default routes depend on platform.  Main files affected: NMEA.cpp, Web.cpp.
-
-Settings via NMEA
-
-Added code (in NMEA.cpp) to allow accessing the added settings via $PSRFD NMEA sentences sent *to* SoftRF - useful for hardware (T-Echo) that does not offer the web UI, automated config, etc.  New in MB148+: the first field in the NMEA sentence (the "version" number) now means "save and reboot".  Thus $PSRFC,1,... will work as before (including with the BT app), while $PSRFC,0,... will just change the setting variables, notsave to EEPROM and not reboot.  Then can now do:  $PSRFC,SAV*3C   to save and reboot.
 
 NMEA processing (in NMEA.cpp)
 
@@ -173,6 +165,13 @@ NMEA processing (in NMEA.cpp)
 * if an external sentence is a config sentence ($PSRF...) it is processed
 * a reply to a config sentence is sent only to the same port from which it came
 (for example, if you use a BT terminal app to send config, the reply is only sent to BT)
+
+Settings via NMEA
+
+Moved this code from GNSS.cpp to NMEA.cpp, following what was done in the mainline.
+Revised this code to be much more compact and readable.
+Added code to allow accessing the added settings via $PSRFD and $PSRFF sentences - useful for hardware (T-Echo) that does not offer the web UI, automated config, etc.  New in MB148+: the first field in the NMEA sentence (the "version" number) now says whether to "save and reboot".  Thus $PSRFC,1,... will work as before (including with the BT app), while $PSRFC,0,... will just change the setting variables, not save and not reboot.  Then can now do:  $PSRFC,SAV*3C   to save and reboot.  Also added replies (to source of the NMEA command) showing the correct checksum if wrong.
+New in MB152: $PSRFS,? to get a list of all settings, formatted as in the settings file.  $PSRFS,0,label,? to query one setting.  $PSRFS,0,label,value to change one setting at a time (and later $PSRFC,SAV*3C to save and reboot).  Or use $PSRFS,1,label,value to change one setting and save and reboot immediately.
 
 Visual alarms and strobe driver
 
@@ -250,7 +249,31 @@ Implemented a revision of the data structures at the heart of SoftRF: the "conta
 
 How to upload and download files
 
-To see the list of files in SPIFFS, connect a terminal to the USB port and access the web interface.  The "Upload egm96s.dem" button on the status web page can actually be used to upload any file into SPIFFS.  To download a file from SPIFFS, use the URL 192.168.1.1/filename (where the "192.168.1.1" will be something else if using an external network).  To see a list of all files in the /logs folder on the SD card, use the "List" button in the flight-logs section of the status web page.  To upload a file into the /logs folder on the SD card, use 192.168.1.1/logupload.  To download any file from the SD card, use the URL 192.168.1.1/pathname - only works if there is no file on SPIFFS of the same name.
+To see the list of files in SPIFFS, connect a terminal to the USB port and access the web interface.  The "Upload egm96s.dem" button, or the Settings "Upload" button, on the status web page can actually be used to upload any file into SPIFFS.  To download any file from SPIFFS, use the URL 192.168.1.1/filename (where the "192.168.1.1" will be something else if using an external network).  To see a list of all files in the /logs folder on the SD card, use the "List" button in the flight-logs section of the status web page.  To upload a file into the /logs folder on the SD card, use 192.168.1.1/logupload.  To download any file from the SD card, use the URL 192.168.1.1/pathname - only works if there is no file on SPIFFS of the same name.
+
+How to monitor RSSI of received signals
+
+SoftRF stores the current RSSI of each tracked aircraft.  For Legacy, Latest, OGNTP, etc, the RSSI is a negative number such as -54.  For ADS-B it shows the RSSI as given by the GNS5892 module, which is approximately in the range 22 to 40+.  The current highest RSSI of all non-ADS-B currently-tracked aircraft is called the "maximum RSSI" - maximum over aircraft, not over time.  If using a SoftRF device to check the transmission strength of another device in various directions, from short range, that aircraft is hopefully giving the "maximum RSSI".  This number can be seen in several places:
+* On the T-Beam in the second page of the OLED display - must turn ADS-B reception off in the settings.
+* In the T-Beam's status web page.
+* On the T-Echo's EPD display, at the bottom of the Time page.
+* At the top of the T-Echo's traffic details page, e.g. it will say "1/1  RSSI -54".
+* In either device, at the end of the $PSRFH "heartbeat" NMEA sentence sent out every 10 seconds, via USB, Wifi, or Bluetooth.
+Viewing it via the web page or a Bluetooth terminal has the advantage that one can be some distance away from the device, thus not affecting the reception.
+
+Settings stored in a file
+
+Unadvertised special:  Added a "myssid" hidden setting.  If you do the following:
+* enter your own custom SSID, leave password blank
+* save and reboot
+* enter external network SSID and password
+* save and reboot
+the outcome is that it will connect to the latter external network when in range, otherwise it will create its own network with the custom SSID - which no longer appears in the single SSID field in the web page.  This "hidden" setting does appear in the settings file, of course:
+...
+myssid,custom-ssid
+ssid,ext-ssid
+psk,password
+...
 
 
 KNOWN ISSUES

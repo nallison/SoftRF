@@ -30,8 +30,8 @@
 #include "../../ApproxMath.h"
 #include "../../system/Time.h"
 #include "../../driver/RF.h"
-#include "../../driver/EEPROM.h"
-#include "../../driver/SDcard.h"
+#include "../../driver/Settings.h"
+#include "../../driver/Filesys.h"
 #include "../data/IGC.h"
 #include "../data/NMEA.h"
 

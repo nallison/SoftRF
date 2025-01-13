@@ -13,19 +13,19 @@
 
 #include <math.h>
 #include <protocol.h>
-#include "GNS5892.h"
-#include "NMEA.h"
-#include "IGC.h"
 #include "../../ApproxMath.h"
 #include "../../../SoftRF.h"
 #include "../../system/SoC.h"
 #include "../../system/Time.h"
-#include "../../driver/EEPROM.h"
+#include "../../driver/Settings.h"
 #include "../../driver/Baro.h"
 #include "../../driver/GNSS.h"
-#include "../../driver/SDcard.h"
+#include "../../driver/Filesys.h"
 #include "../../TrafficHelper.h"
 #include "../radio/Legacy.h"
+#include "GNS5892.h"
+#include "NMEA.h"
+#include "IGC.h"
 
 static adsfo_t fo1090;  // EmptyFO1090;
 static char buf1090[256];
@@ -470,6 +470,7 @@ static float dLat[2], flrlat[2], modlat[2], dLon[2], flrlon[2], modlon[2];
 static uint32_t ourcprlat[2], ourcprlon[2];
 static float dLatHalf, dLonHalf;
 static int32_t maxcprdiff, maxcprdiff_sq;
+static float maxdistance1090, maxaltdiff1090;
 
 // similar values precomputed for adjacent NL zones
 static int32_t cprMinuslat[2], cprNL0lat[2], cprNL1lat[2], cprPluslat[2];
@@ -587,7 +588,7 @@ static void CPRRelative_precomp()
         return;
 
     // The exact reference location is not important, just not too far away
-    // - except that the early filtering of "too far" targets is based on it, not our actual location
+    // - except that early filtering of "too far" targets is based on it, not on our actual location
     if (fabs(ThisAircraft.latitude  - reflat) < 0.15
     &&  fabs(ThisAircraft.longitude - reflon) < 0.21)    // about 9 nm
         return;
@@ -667,10 +668,15 @@ static void CPRRelative_setup()
     // for both odd and even, this value is conservative:
     dLatHalf = 0.5 * dLat[0];
     // first-cut range limit (along each axis):
-    maxcprdiff = 9000;   // about 25nm = 9nm pre-computation threshold + 16nm pre-filtering range
+    if (settings->hrange1090 > 0)
+      maxcprdiff = 200*(16+settings->hrange1090);   // 9nm pre-computation threshold + range
+    else
+      maxcprdiff = 20000;  // 100km
     // a squared scaled version for 2D distance
     maxcprdiff_sq = (maxcprdiff >> 4) * (maxcprdiff >> 4);
-    
+    maxdistance1090 = 1000 * settings->hrange1090;
+    maxaltdiff1090  =  100 * settings->vrange1090;
+
     // compute what does depend on reflat, reflon
     // - put this off until there is a GNSS fix
     //CPRRelative_precomp();
@@ -780,13 +786,15 @@ static void update_traffic_position(int index)
         cip->aircraft_type = AIRCRAFT_TYPE_UFO;   // will be updated by identity message
         cip->tx_type   = fo1090.tx_type;
         cip->airborne  = 1;          // we only process airborne traffic (mm.type 9-22)
+        cip->stealth   = false;     // affects PFLAA reporting
+        cip->no_track  = false;     // affects PFLAA reporting
         //cip->circling  = 0;
         //cip->timerelayed = 0;
     } else {
         // this ID already tracked, just update some fields
         cip = &Container[index];
-        //if (fo1090.tx_type > cip->tx_type)
-        //    cip->tx_type = fo1090.tx_type;     // already done
+        if (fo1090.tx_type > cip->tx_type)
+            cip->tx_type = fo1090.tx_type;
         if (mm.alt_type == 0) {               // not GPS altitude
           if (cip->baro_alt_diff != 0)        // from a velocity message
             fo1090.altitude += cip->baro_alt_diff;
@@ -997,6 +1005,8 @@ void update_mode_s_traffic(int i)
     if (cip->tx_type <= TX_TYPE_S) {       // no ADS-B position data
         cip->distance = fo1090.distance;   // estimated from RSSI
         cip->bearing  = 0;                 // non-directional
+        cip->dy = fo1090.distance;         // may not be necessary?
+        cip->dx = 0;
     }
     cip->rssi = mm.rssi;
     cip->timestamp   = OurTime;
@@ -1082,10 +1092,9 @@ Serial.println(alt);
         alt = alt*25-1000;
     }
     fo1090.altitude = 0.3048 * (float) alt;    // convert altitude from feet into meters
-    if (fabs(fo1090.altitude-ThisAircraft.altitude) > 2000) {
-        //if (((settings->debug_flags & DEBUG_DEEPER) == 0 || (settings->debug_flags & DEBUG_ALARM) != 0)
-        if ((! ((settings->debug_flags & (DEBUG_DEEPER|DEBUG_ALARM)) == DEBUG_DEEPER))
-               && fo1090.addr != settings->follow_id)
+    if (settings->vrange1090 /* 0 means no limit */
+           && fabs(fo1090.altitude - ThisAircraft.altitude) > maxaltdiff1090) {
+        if (fo1090.addr != settings->follow_id)
             return false;
     }
     update_mode_s_traffic(index);
@@ -1105,9 +1114,8 @@ static bool parse_identity(int i)
 
     container_t *cip = &Container[i];
 
-    //if (fo1090.tx_type > cip->tx_type)
-    //    cip->tx_type = fo1090.tx_type;
-    // - may be adding aircraft type (& callsign) to what is still Mode S traffic
+    // may be adding aircraft type (& callsign) to what is still Mode S traffic
+    // - but do not update tx_type until valid position message arrives
 
     uint8_t ac_type = 0;
     if (mm.sub != 0 && mm.type > 2)
@@ -1178,15 +1186,15 @@ static bool parse_position(int index)
     } else {      // GNSS alt, rare
         mm.alt_type = 1;
         //mm.msgtype = 'G';
-        fo1090.altitude = (float)((msg[5] << 4) | ((msg[6] >> 4) & 0x0F));   // meters!
+        fo1090.altitude = (float)((msg[5] << 4) | ((msg[6] >> 4) & 0x0F));
+           // supposedly meters, but can't be right, since 12 bits is not enough
+           fo1090.altitude = 0;
     }
 
     // filter by altitude, but always include "followed" aircraft
-    // show all altitudes in debug-deeper mode for testing
-    if (fabs(fo1090.altitude - ThisAircraft.altitude) > 2000) {
-        //if (((settings->debug_flags & DEBUG_DEEPER) == 0 || (settings->debug_flags & DEBUG_ALARM) != 0)
-        if ((! ((settings->debug_flags & (DEBUG_DEEPER|DEBUG_ALARM)) == DEBUG_DEEPER))
-               && fo1090.addr != settings->follow_id)
+    if (settings->vrange1090 /* 0 means no limit */
+           && fabs(fo1090.altitude - ThisAircraft.altitude) > maxaltdiff1090) {
+        if (fo1090.addr != settings->follow_id)
             return false;
     }
 
@@ -1285,16 +1293,22 @@ static bool parse_position(int index)
     if (decodeCPRrelative() == false)        // error decoding lat/lon
         return false;
 
-    // compute more exact distance, from this aircraft's actual location
+    // compute more exact distance, & relative E & N, from this aircraft's actual location
     int32_t y = (int32_t)(111300.0 * (fo1090.latitude - ThisAircraft.latitude));     // meters
-    int32_t x = (int32_t)(111300.0 * (fo1090.longitude - ThisAircraft.longitude) * CosLat(reflat));
+    int32_t x = (int32_t)(111300.0 * (fo1090.longitude - ThisAircraft.longitude) * CosLat(/*ThisAircraft.latitude*/));
     fo1090.dx = x;
     fo1090.dy = y;
     fo1090.distance = (float)iapproxHypotenuse1(x, y);
-    if (fo1090.distance > (15*1852)) {    // 15 nm
-        if (fo1090.addr != settings->follow_id && (settings->debug_flags & DEBUG_DEEPER) == 0) {
-            if (index < MAX_TRACKING_OBJECTS)   // found
-                Container[index].distance = 39999;
+    if (settings->hrange1090 && fo1090.distance > maxdistance1090) {
+        if (fo1090.addr != settings->follow_id) {
+            if (index < MAX_TRACKING_OBJECTS) {   // found, so used to be closer
+                Container[index].latitude = fo1090.latitude;
+                Container[index].longitude = fo1090.longitude;
+                Container[index].distance = fo1090.distance;
+                Container[index].dx = x;
+                Container[index].dy = y;
+                // but leave its timestamp alone, let it expire
+            }
             return false;
         }
         // else, if DEBUG_DEEPER, then continue here
@@ -1322,6 +1336,14 @@ Serial.print(" bearing: ");
 Serial.print((int)fo1090.bearing);
 Serial.print(" RSSI: ");
 Serial.println(mm.rssi);
+//Serial.print(" Latitude: ");
+//Serial.println(fo1090.latitude);
+//Serial.print(" Longitude: ");
+//Serial.println(fo1090.longitude);
+//Serial.print(" dx: ");
+//Serial.println(fo1090.dx);
+//Serial.print(" dy: ");
+//Serial.println(fo1090.dy);
 }
 }
     update_traffic_position(index);
@@ -1345,10 +1367,6 @@ static bool parse_velocity(int i)
     if (cip->velocitytime == OurTime)
         return false;
     cip->velocitytime = OurTime;
-
-    //if (fo1090.tx_type > cip->tx_type)
-    //    cip->tx_type = fo1090.tx_type;
-    // - only process velocity messages after position is known
 
     int ew_dir;
     int ew_velocity;
@@ -1651,8 +1669,9 @@ Serial.println("ignoring S - have recent P");
                 return false;
 
             // mark as transmitting ADS-B, even if rejected below (too far, etc)
-            if (fo1090.tx_type > cip->tx_type)
-                cip->tx_type = fo1090.tx_type;
+            //if (fo1090.tx_type > cip->tx_type)
+            //    cip->tx_type = fo1090.tx_type;
+            // - don't, since then Mode-S data may be treated as "directional"
         }
 
         return parse_position(index);

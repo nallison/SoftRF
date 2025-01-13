@@ -26,7 +26,7 @@
 #include "D1090.h"
 #include "../../driver/GNSS.h"
 #include "GDL90.h"
-#include "../../driver/EEPROM.h"
+#include "../../driver/Settings.h"
 #include "../../TrafficHelper.h"
 
 #define ADDR_TO_HEX_STR(s, c) (s += ((c) < 0x10 ? "0" : "") + String((c), HEX))

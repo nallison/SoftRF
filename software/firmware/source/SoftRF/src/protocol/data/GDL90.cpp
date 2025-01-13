@@ -29,7 +29,7 @@
 #include "../../driver/RF.h"
 #include "../../driver/Baro.h"
 #include "../../driver/GNSS.h"
-#include "../../driver/EEPROM.h"
+#include "../../driver/Settings.h"
 #include "../../driver/WiFi.h"
 #include "../../TrafficHelper.h"
 #include "../radio/Legacy.h"
@@ -611,8 +611,9 @@ Serial.printf("GDL90>%x %s, %f, %f, %.0f\r\n",
   fo.addr_type = ADDR_TYPE_ICAO;
   fo.airborne = 1;
   fo.circling = 0;
-  ++adsb_packets_counter;
-
+#if defined(ESP32)
+  ++adsb_packets_counter;    // in GNS5892
+#endif
   RF_last_rssi = 0;
   AddTraffic(&fo, (char *) tp->callsign);
 }

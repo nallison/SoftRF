@@ -24,7 +24,7 @@
 
 #include "OLED.h"
 
-#include "EEPROM.h"
+#include "Settings.h"
 #include "RF.h"
 #include "../protocol/data/GNS5892.h"
 #include "../protocol/data/NMEA.h"
@@ -135,9 +135,6 @@ const char *aircraft_type_lbl[] = {
   [AIRCRAFT_TYPE_WINCH]      = "WI"
 };
 
-const char SoftRF_text1[]  = "SoftRF";
-const char SoftRF_text2[]  = "and";
-const char SoftRF_text3[]  = "LilyGO";
 const char ID_text[]       = "ID";
 const char PROTOCOL_text[] = "PROTOCOL";
 const char TX_text[]       = "TX";
@@ -148,8 +145,6 @@ const char FIX_text[]      = "FIX";
 const char TYP_text[]      = "TYP";
 const char BND_text[]      = "BND";
 const char BAT_text[]      = "BAT";
-const char DFLT_text[]     = "DFLT";
-const char USER_text[]     = "USER";
 
 #if !defined(EXCLUDE_OLED_BARO_PAGE)
 const char ALT_text[]      = "ALT M";

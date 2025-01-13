@@ -6,10 +6,11 @@
 #if defined(ESP32)
 
 #include "../../SoftRF.h"
+#include "../system/SoC.h"
+#include "Filesys.h"
 #include "Voice.h"
 
-#include "SPIFFS.h"
-// #include <FS.h>
+//#include "SPIFFS.h"
 
 // C table generated from file: traffic.wav - sans header
 
@@ -298,11 +299,7 @@ bool word2wav(const char *word) {
 
     for (int i=0; i<17; i++) {
         if (strcmp(word,words[i])==0 && offsets[i] > 0) {
-            //if (!SPIFFS.begin(true)) {
-            //    Serial.println(F("An Error has occurred while mounting SPIFFS"));
-            //    break;
-            //}
-            tarfile = SPIFFS.open("/waves.tar", "r");
+            tarfile = FILESYS.open("/waves.tar", "r");
             if (!tarfile) {
                 Serial.println(F("Failed to open waves.tar"));
                 break;
@@ -424,7 +421,7 @@ typedef struct wavProperties_s {
     uint16_t bitsPerSample;
 } wavProperties_t;
 
-/* parse waves.tar in SPIFFS, store found offsets */
+/* parse waves.tar in FILESYS, store found offsets */
 // public
 int parse_wav_tar()
 {
@@ -437,17 +434,17 @@ int parse_wav_tar()
 
     clear_waves();
 
-    //if (!SPIFFS.begin(true)) {
-    //    Serial.println(F("An Error has occurred while mounting SPIFFS"));
-    //    return 0;
-    //}
-
-    if (!SPIFFS.exists("/waves.tar")) {
-        Serial.println(F("waves.tar not present in SPIFFS"));
+    if (! FS_is_mounted) {
+        Serial.println(F("File system not mounted"));
         return 0;
     }
 
-    File tarfile = SPIFFS.open("/waves.tar", "r");
+    if (!FILESYS.exists("/waves.tar")) {
+        Serial.println(F("waves.tar not present in FILESYS"));
+        return 0;
+    }
+
+    File tarfile = FILESYS.open("/waves.tar", "r");
     if (!tarfile) {
         Serial.println(F("Failed to open waves.tar"));
         return 0;

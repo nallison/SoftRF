@@ -27,7 +27,7 @@ void  Strobe_fini()        {}
 
 #include "Strobe.h"
 #include "Buzzer.h"
-#include "EEPROM.h"
+#include "Settings.h"
 #include "../TrafficHelper.h"
 
 /* need this for the alarm levels enum: */

@@ -24,6 +24,7 @@
 
 #include "../driver/EPD.h"
 #include "../driver/Baro.h"
+#include "../driver/Settings.h"
 
 #include <gfxfont.h>
 #include <FreeMono9pt7b.h>
@@ -47,11 +48,11 @@ void EPD_baro_setup()
     EPD_pages_mask |= (1 << VIEW_MODE_BARO);
   }
 
-  alt_scale = ui->units == UNITS_METRIC ? 1.0 : _GPS_FEET_PER_METER;
+  alt_scale = (ui->units == UNITS_METRIC ? 1.0 : _GPS_FEET_PER_METER);
 
   memcpy(navbox1.title, Altitude_text, strlen(Altitude_text));
   strcpy(navbox1.title + strlen(Altitude_text),
-        ui->units == UNITS_METRIC ? "M" : "FT");
+        (ui->units == UNITS_METRIC ? "M" : "FT"));
   navbox1.x          = 0;
   navbox1.y          = 0;
   navbox1.width      = display->width();

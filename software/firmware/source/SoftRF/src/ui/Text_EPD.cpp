@@ -27,7 +27,7 @@
 #include <TimeLib.h>
 
 #include "../TrafficHelper.h"
-#include "../driver/EEPROM.h"
+#include "../driver/Settings.h"
 #include "../protocol/data/NMEA.h"
 #include "../protocol/data/GDL90.h"
 #include "../driver/GNSS.h"
@@ -138,7 +138,7 @@ static void EPD_Draw_Text()
       break;
     }
 
-    if (ui->idpref == ID_TYPE) {
+    if (ui->epdidpref == ID_TYPE) {
       uint8_t acft_type = traffic_by_dist[i].fop->aircraft_type;
       acft_type = acft_type > AIRCRAFT_TYPE_STATIC ? AIRCRAFT_TYPE_UNKNOWN : acft_type;
       strncpy(id_text, Aircraft_Type[acft_type], sizeof(id_text));

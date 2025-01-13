@@ -22,12 +22,12 @@
 #include "system/SoC.h"
 #include "system/Time.h"
 #include "TrafficHelper.h"
-#include "driver/EEPROM.h"
+#include "driver/Settings.h"
 #include "driver/RF.h"
 #include "driver/GNSS.h"
 #include "driver/Buzzer.h"
 #include "driver/Strobe.h"
-#include "driver/SDcard.h"
+#include "driver/Filesys.h"
 #include "ui/Web.h"
 #include "protocol/radio/Legacy.h"
 #include "protocol/data/NMEA.h"
@@ -41,23 +41,37 @@
 #endif
 #endif
 
-#if defined(ESP32)
-#include "SPIFFS.h"
-// #include <FS.h>
+#if defined(FILESYS)
+//#include "SPIFFS.h"
 File AlarmLog;
 bool AlarmLogOpen = false;
 #endif
 
 void startlogs()
 {
-#if defined(ESP32)
+#if defined(FILESYS)
     // restart alarm log on first takeoff after boot
-    if (AlarmLogOpen==false && settings->logalarms) {
-      //if (SPIFFS.begin(true)) {
+    if (settings->logalarms && AlarmLogOpen==false && FS_is_mounted) {
+        const char *filename = "/alarmlog.txt";
         bool append = false;
-        if (SPIFFS.exists("/alarmlog.txt") && SPIFFS.totalBytes() - SPIFFS.usedBytes() > 10000)
-            append = true;
-        AlarmLog = SPIFFS.open("/alarmlog.txt", (append? FILE_APPEND : FILE_WRITE));
+#if defined(ESP32)
+        if (FILESYS.exists(filename)) {
+            if (FILESYS_free_kb() > 15)
+                append = true;
+            else
+                FILESYS.remove(filename);
+        }
+        AlarmLog = FILESYS.open(filename, (append? FILE_APPEND : FILE_WRITE));
+#else
+        // the nRF52 FatFS does not have totalBytes() and usedBytes() nor FILE_APPEND
+        if (FILESYS.exists(filename)) {
+            if (FILESYS_free_kb() > 50)
+                append = true;
+            else
+                FILESYS.remove(filename);
+        }
+        AlarmLog = FILESYS.open(filename, (append? (O_WRITE | O_APPEND) : (O_WRITE | O_CREAT)));
+#endif
         if (AlarmLog) {
             AlarmLogOpen = true;
             if (append == false) {
@@ -67,10 +81,8 @@ void startlogs()
         } else {
             Serial.println(F("Failed to open alarmlog.txt"));
         }
-      //} else {
-      //    Serial.println(F("Failed to start SPIFFS"));
-      //}
     }
+#endif   // FILESYS
 #if defined(USE_SD_CARD)
     // also start this flight's SDlog with a banner:
     int year   = gnss.date.year();
@@ -83,27 +95,25 @@ void startlogs()
         "%02d/%02d/%02d %02d:%02d takeoff\r\n", year, month, day, hour, minute);
     Serial.println(NMEABuffer);
     SD_log(NMEABuffer);
+#endif
     // and, if flight-logging, start now:
     if (settings->logflight == FLIGHT_LOG_AIRBORNE
      || settings->logflight == FLIGHT_LOG_TRAFFIC) {
         openFlightLog();
     }
-#endif
-#endif
 }
 
 // close the alarm log and flight log after landing
 void stoplogs()
 {
-#if defined(ESP32)
+#if defined(FILESYS)
     AlarmLog.close();
     AlarmLogOpen = false;
-#if defined(USE_SD_CARD)
-    if (settings->logflight == FLIGHT_LOG_AIRBORNE
-     || settings->logflight == FLIGHT_LOG_TRAFFIC)
+#endif
+//#if defined(USE_SD_CARD)
+    if (settings->logflight != FLIGHT_LOG_ALWAYS)
           closeFlightLog();
-#endif
-#endif
+//#endif
 }
 
 unsigned long UpdateTrafficTimeMarker = 0;
@@ -756,7 +766,7 @@ static int8_t Alarm_Legacy(container_t *this_aircraft, container_t *fop)
 
 void logOneTraffic(container_t *fop, const char *label)
 {
-#if defined(USE_SD_CARD)
+//#if defined(USE_SD_CARD)
     uint32_t addr = ((fop->no_track && fop->tx_type==TX_TYPE_FLARM)? 0xAAAAAA : fop->addr);
     int alarm_level = fop->alarm_level - 1;
     if (alarm_level < ALARM_LEVEL_NONE)
@@ -772,14 +782,17 @@ void logOneTraffic(container_t *fop, const char *label)
     //Serial.print(NMEABuffer);
     NMEAOutD();
     FlightLogComment(NMEABuffer+4);   // it will prepend the LPLT
-#endif
+//#endif
 }
 
 // insert data about all "close" traffic into the flight log
-// called after the logFlightPosition() call
+// - called after the logFlightPosition() call
+// - do this even on FATFS, despite space on T-Echo being small
+// - can avoid by not setting logflight=traffic
+// - alarms will still log if settings->logalarms
 void logCloseTraffic()
 {
-#if defined(USE_SD_CARD)
+//#if defined(USE_SD_CARD)
     container_t *fop;
     for (int i=0; i < MAX_TRACKING_OBJECTS; i++) {
         fop = &Container[i];
@@ -794,7 +807,7 @@ void logCloseTraffic()
             continue;
         logOneTraffic(fop, "LPLTT");
     }
-#endif
+//#endif
 }
 
 struct {
@@ -810,15 +823,12 @@ void Calc_Traffic_Distances(container_t *cip)
 {
     cip->alt_diff = cip->altitude - ThisAircraft.altitude;
     /* use an approximation for distance & bearing between 2 points */
-    float x, y;
-    y = 111300.0 * (cip->latitude  - ThisAircraft.latitude);         /* meters */
-    x = 111300.0 * (cip->longitude - ThisAircraft.longitude) * CosLat(ThisAircraft.latitude);
-    cip->dx = (int32_t) x;
-    cip->dy = (int32_t) y;
-    //cip->distance = approxHypotenuse(x, y);                       /* meters  */
-    cip->distance = (float) iapproxHypotenuse1(cip->dx, cip->dy);   /* meters  */
-    //cip->bearing = atan2_approx(y, x);                     /* degrees from ThisAircraft to cip */
-    cip->bearing = (float) iatan2_approx(cip->dy, cip->dx);  /* degrees from ThisAircraft to fop */
+    int32_t y = (int32_t)(111300.0 * (cip->latitude - ThisAircraft.latitude));     // meters
+    int32_t x = (int32_t)(111300.0 * (cip->longitude - ThisAircraft.longitude) * CosLat(/*ThisAircraft.latitude*/));
+    cip->dx = x;
+    cip->dy = y;
+    cip->distance = (float) iapproxHypotenuse1(x, y);   /* meters  */
+    cip->bearing = (float) iatan2_approx(y, x);         /* degrees from ThisAircraft to fop */
     if (cip->bearing < 0)
         cip->bearing += 360;
 }
@@ -830,7 +840,7 @@ void Stash_Traffic_Distances(ufo_t *fop)
     /* use an approximation for distance & bearing between 2 points */
     float x, y;
     y = 111300.0 * (fop->latitude  - ThisAircraft.latitude);         /* meters */
-    x = 111300.0 * (fop->longitude - ThisAircraft.longitude) * CosLat(ThisAircraft.latitude);
+    x = 111300.0 * (fop->longitude - ThisAircraft.longitude) * CosLat(/*ThisAircraft.latitude*/);
     stash.dx = (int32_t) x;
     stash.dy = (int32_t) y;
     //stash.distance = approxHypotenuse(x, y);                         /* meters  */
@@ -931,12 +941,13 @@ void Traffic_Update(container_t *fop)
           Alarm_timer = 0;
       }
 
-#if defined(USE_SD_CARD)
-      if (fop->alarm_level > old_alarm_level) {
-        if (settings->logalarms || settings->logflight == FLIGHT_LOG_TRAFFIC)
-          logOneTraffic(fop, "LPLTA");  // do not wait until logFlightPosition()
+//#if defined(USE_SD_CARD)
+// - allow logalarms even on FATFS
+      if (fop->alarm_level > old_alarm_level && FlightLogOpen) {
+          if (settings->logalarms || settings->logflight == FLIGHT_LOG_TRAFFIC)
+            logOneTraffic(fop, "LPLTA");  // do not wait until logFlightPosition()
       }
-#endif
+//#endif
   }
 }
 
@@ -997,9 +1008,10 @@ bool air_relay(container_t *fop)
               PSTR("$PSRLO,%02d:%02d,%06x,%.5f,%.5f\r\n"),
               gnss.time.hour(), gnss.time.minute(), fop->addr, fop->latitude, fop->longitude);
             NMEAOutD();
-#if defined(USE_SD_CARD)
+//#if defined(USE_SD_CARD)
+            // report in flight log too, even on FATFS
             FlightLogComment(NMEABuffer+3);   // it will prepend the LPLT
-#endif
+//#endif
         }
         fop->timerelayed = ThisAircraft.timestamp;
         lastrelay = millis();
@@ -1101,15 +1113,6 @@ void AddTraffic(ufo_t *fop, const char *callsign)
                 OurTime <= cip->timestamp + ENTRY_EXPIRATION_TIME)
                 return;
             // take over this slot (fall through)
-#if 0
-            //*cip = EmptyContainer;
-            EmptyContainer(cip);
-            CopyTraffic(cip, fop, callsign);
-            Calc_Traffic_Distances(cip);
-            Traffic_Update(cip);
-            if (do_relay)  air_relay(cip);
-            return;
-#endif
         }
 
         // overwrite external (ADS-B) data about aircraft that also has FLARM
@@ -1119,15 +1122,6 @@ void AddTraffic(ufo_t *fop, const char *callsign)
                 OurTime <= cip->timestamp + ENTRY_EXPIRATION_TIME)
                 return;
             // else fall through
-#if 0
-            //*cip = EmptyContainer;
-            EmptyContainer(cip);
-            CopyTraffic(cip, fop, callsign);
-            Calc_Traffic_Distances(cip);
-            Traffic_Update(cip);
-            if (do_relay)  air_relay(cip);
-            return;
-#endif
         }
 
         // if both are from ADS-B, prefer direct over TIS-B (relayed ADS-B treated as TIS-B)
@@ -1254,9 +1248,12 @@ void ParseData(void)
     rx_size = rx_size > sizeof(fo_raw) ? sizeof(fo_raw) : rx_size;
 
     if (memcmp(RxBuffer, TxBuffer, rx_size) == 0) {
+Serial.print("RF loopback is detected, rx_try=");
+Serial.println(which_rx_try);
       if (settings->nmea_p) {
         StdOut.println(F("$PSRFE,RF loopback is detected"));
       }
+      //rx_packets_counter--;
       return;
     }
 
@@ -1445,7 +1442,7 @@ if (fop->protocol == RF_PROTOCOL_ADSB_1090 && (settings->debug_flags & DEBUG_DEE
               Alarm_timer = millis() + 9000;    // when may warn again about this aircraft
           mfop->alert |= TRAFFIC_ALERT_SOUND;   // not actually used for anything
         }
-#if defined(ESP32)
+#if defined(FILESYS)
         if (alarmcount>0 && settings->logalarms && AlarmLogOpen) {
           int year  = gnss.date.year();
           if( year > 99)  year = year - 2000;
@@ -1474,7 +1471,7 @@ Serial.println(NMEABuffer);
           if (AlarmLog.write((const uint8_t *)NMEABuffer, len) == len) {
               AlarmLog.flush();
           } else {
-              // perhaps out of space in SPIFFS
+              // perhaps out of space in FILESYS
               AlarmLog.close();
               AlarmLogOpen = false;
           }

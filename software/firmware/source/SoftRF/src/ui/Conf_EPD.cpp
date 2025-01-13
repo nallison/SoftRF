@@ -27,7 +27,7 @@
 #include <TimeLib.h>
 
 #include "../TrafficHelper.h"
-#include "../driver/EEPROM.h"
+#include "../driver/Settings.h"
 #include "../protocol/data/NMEA.h"
 #include "../protocol/data/GDL90.h"
 #include "../driver/GNSS.h"

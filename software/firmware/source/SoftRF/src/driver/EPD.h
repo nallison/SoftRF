@@ -183,11 +183,11 @@ typedef struct UI_Settings {
     uint8_t  rotate:2;
     uint8_t  orientation:1;
     uint8_t  adb:3;
-    uint8_t  idpref:2;
+    uint8_t  epdidpref:2;
 
-    uint8_t  vmode:3;
+    uint8_t  viewmode:3;
     uint8_t  voice:2;
-    uint8_t  aghost:3;
+    uint8_t  antighost:3;
 
     uint8_t  filter:4;
     uint8_t  power_save:4;
@@ -222,7 +222,7 @@ void EPD_fini(int, bool);
 void EPD_info1();
 void EPD_info2(int, char *, char *, char *);
 
-void EPD_Mode();
+void EPD_Mode(bool same_page);
 void EPD_Up();
 void EPD_Down();
 void EPD_Message(const char *, const char *);
@@ -283,7 +283,7 @@ extern volatile uint8_t EPD_update_in_progress;
 extern const char *Aircraft_Type[];
 extern const char *Region_Label[];
 extern ui_settings_t ui_settings;
-extern ui_settings_t *ui;
+//extern ui_settings_t *ui;
 
 static uint8_t sleep_icon_128x128[] PROGMEM = {
   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,

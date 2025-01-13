@@ -26,8 +26,8 @@
 #include "../system/SoC.h"
 #include "../TrafficHelper.h"
 #include "GNSS.h"
-#include "EEPROM.h"
-#include "SDcard.h"
+#include "Settings.h"
+#include "Filesys.h"
 #include "../protocol/data/NMEA.h"
 #include "../system/Time.h"
 #include "WiFi.h"
@@ -37,9 +37,8 @@
 
 #if defined(USE_EGM96)
 //#include <egm96s.h>
-#if defined(ESP32)    // need SPIFFS
-#include "SPIFFS.h"
-// #include <FS.h>
+#if defined(FILESYS)
+//#include "SPIFFS.h"
 #endif
 static float geo_sep_from_file = 0.0;
 #endif
@@ -816,10 +815,8 @@ static bool ublox_setup()
   Serial_GNSS_Out.write("$PUBX,40,GLL,0,0,0,0*5C\r\n"); delay(250);
   Serial_GNSS_Out.write("$PUBX,40,GSV,0,0,0,0*59\r\n"); delay(250);
   Serial_GNSS_Out.write("$PUBX,40,VTG,0,0,0,0*5E\r\n"); delay(250);
-#if !defined(NMEA_TCP_SERVICE)
-  /* <<< what does TCP have to do with it? */
-  //Serial_GNSS_Out.write("$PUBX,40,GSA,0,0,0,0*4E\r\n"); delay(250);
-#endif
+  if (settings->mode == SOFTRF_MODE_MORENMEA)
+    Serial_GNSS_Out.write("$PUBX,40,GSA,0,0,0,0*4E\r\n"); delay(250);
 #endif
 
   return true;
@@ -1104,6 +1101,7 @@ static bool sony_setup()
 
   /* GGA + GSA + RMC */
   Serial_GNSS_Out.write("@BSSL 0x25\r\n"); delay(250);
+  // >>> should find out how to disable GSA unless (settings->mode == SOFTRF_MODE_MORENMEA)
   /* GPS + GLONASS. This command must be issued at Idle state */
   Serial_GNSS_Out.write("@GNS 3\r\n");     delay(250);
   /*  Positioning algorithm. This command must be issued at Idle state */
@@ -1221,6 +1219,7 @@ static bool mtk_setup()
 
   /* RMC + GGA + GSA */
   Serial_GNSS_Out.write("$PMTK314,0,1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0*29\r\n");
+  // >>> should find out how to disable GSA unless (settings->mode == SOFTRF_MODE_MORENMEA)
   GNSS_FLUSH(); delay(250);
 
   /* Aviation mode */
@@ -1283,15 +1282,10 @@ static bool goke_setup()
   goke_sendcmd("$PGKC239,1*3A\r\n");
 #endif
 
-#if defined(NMEA_TCP_SERVICE)
-  /* RMC + GGA + GSA */
-  goke_sendcmd("$PGKC242,0,1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0*36\r\n");
-#else
-  /* RMC + GGA */
-//goke_sendcmd("$PGKC242,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*37\r\n");
-  /* <<< why not GSA? what does TCP have to do with it? */
-  goke_sendcmd("$PGKC242,0,1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0*36\r\n");
-#endif
+  if (settings->mode == SOFTRF_MODE_MORENMEA)  /* RMC + GGA + GSA */
+    goke_sendcmd("$PGKC242,0,1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0*36\r\n");
+  else   /* RMC + GGA */
+    goke_sendcmd("$PGKC242,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*37\r\n");
 
   if (get_pps_pin() != SOC_UNUSED_PIN) {
     /* Enable 3D fix 1PPS output */
@@ -1380,16 +1374,17 @@ static bool at65_setup()
     //Serial_GNSS_Out.write("$PCAS04,7*1E\r\n"); /* GPS + GLONASS + BEIDOU */
   delay(250);
   Serial_GNSS_Out.write("$PCAS02,1000*2E\r\n");  /* set positioning frequency to 1Hz */
-#if defined(NMEA_TCP_SERVICE)
-  /* GGA,RMC and GSA */
-  Serial_GNSS_Out.write("$PCAS03,1,0,1,0,1,0,0,0,0,0,,,0,0*03\r\n"); delay(250);
-#else
-  /* GGA and RMC */
-//Serial_GNSS_Out.write("$PCAS03,1,0,0,0,1,0,0,0,0,0,,,0,0*02\r\n"); delay(250);
-  /* <<< why not GSA? what does TCP have to do with it? */
-  Serial_GNSS_Out.write("$PCAS03,1,0,1,0,1,0,0,0,0,0,,,0,0*03\r\n"); delay(250);
-#endif
-  Serial_GNSS_Out.write("$PCAS11,6*1B\r\n"); /* Aviation < 2g */     delay(250);
+  if (settings->mode == SOFTRF_MODE_MORENMEA) {
+    /* GGA,RMC and GSA */
+    Serial_GNSS_Out.write("$PCAS03,1,0,1,0,1,0,0,0,0,0,,,0,0*03\r\n");
+    delay(250);
+  } else {
+    /* GGA and RMC */
+    Serial_GNSS_Out.write("$PCAS03,1,0,0,0,1,0,0,0,0,0,,,0,0*02\r\n");
+    delay(250);
+  }
+  Serial_GNSS_Out.write("$PCAS11,6*1B\r\n"); /* Aviation < 2g */
+  delay(250);
 
   return true;
 }
@@ -2292,7 +2287,12 @@ static float AsBearing(float angle)
 
 void LookupSeparation(float lat, float lon)
 {
-#if defined(ESP32)    // need SPIFFS
+#if defined(FILESYS)
+  if (! FS_is_mounted) {
+      Serial.println(F("File system is not mounted"));
+      return;
+  }
+
   int ilat, ilon;
 
   ilat = round((90.0 - lat) / 2.0);
@@ -2307,9 +2307,9 @@ void LookupSeparation(float lat, float lon)
     return;
 
   int retval = -1;
-  File egm96file = SPIFFS.open("/egm96s.dem", "r");
+  File egm96file = FILESYS.open("/egm96s.dem", "r");
   if (!egm96file) {
-      Serial.println(F("File egm96s.dem not found in SPIFFS"));
+      Serial.println(F("File egm96s.dem not found"));
       return;
   } else {
       if (! egm96file.seek(offset, SeekSet))

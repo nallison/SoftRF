@@ -92,7 +92,7 @@ const char *Region_Label[] = {
 unsigned long EPDTimeMarker = 0;
 static unsigned long EPD_anti_ghosting_timer = 0;
 static uint8_t anti_ghosting_minutes = 0;
-
+static bool screen_off = false;
 int EPD_view_mode = 0;
 int EPD_prev_view = 0;
 bool EPD_vmode_updated = true;
@@ -192,7 +192,7 @@ bool EPD_setup(bool splash_screen)
   EPD_time_setup();
   EPD_imu_setup();
 
-  EPD_view_mode = ui->vmode;   // default initial EPD page
+  EPD_view_mode = ui->viewmode;   // default initial EPD page
 
   if (EPD_pages_mask & (1 << EPD_view_mode) == 0) {
     for (int i=0; i < VIEW_MODES_COUNT; i++) {
@@ -205,7 +205,7 @@ bool EPD_setup(bool splash_screen)
     }
   }
 
-  switch (ui->aghost)
+  switch (ui->antighost)
   {
     case ANTI_GHOSTING_2MIN:
       anti_ghosting_minutes = 2;
@@ -465,6 +465,9 @@ void EPD_info2(int acfts, char *reg, char *mam, char *cn)
 
 void EPD_loop()
 {
+  if (screen_off)    // in screen-saver mode
+      return;
+
   switch (hw_info.display)
   {
   case DISPLAY_EPD_1_54:
@@ -524,7 +527,7 @@ void EPD_loop()
 
       EPD_prev_view = EPD_view_mode;
 
-      bool auto_ag_condition = ui->aghost == ANTI_GHOSTING_AUTO  &&
+      bool auto_ag_condition = ui->antighost == ANTI_GHOSTING_AUTO  &&
                                (EPD_view_mode == VIEW_MODE_RADAR ||
                                 EPD_view_mode == VIEW_MODE_TEXT) ?
                                (Traffic_Count() == 0) : true;
@@ -662,14 +665,20 @@ void EPD_fini(int reason, bool screen_saver)
   }
 }
 
-void EPD_Mode()
+void EPD_Mode(bool same_page)
 {
+  screen_off = false;   // wake up from screen-saver mode
+
   if (hw_info.display == DISPLAY_EPD_1_54) {
     if (EPD_view_mode == VIEW_CHANGE_SETTINGS) {
         EPD_chgconf_page();
         return;
     }
     if (EPD_view_mode >= VIEW_MODES_COUNT) {
+        return;
+    }
+    if (same_page) {                 // waking from "screen saver"
+        EPD_vmode_updated = true;
         return;
     }
     for (int i=0; i < VIEW_MODES_COUNT; i++) {
@@ -764,16 +773,16 @@ void EPD_Message(const char *msg1, const char *msg2)
   uint16_t x, y;
 
 #if defined(USE_EPD_TASK)
-  if (msg1 != NULL && strlen(msg1) != 0 && EPD_update_in_progress == EPD_UPDATE_NONE) {
-//  if (msg1 != NULL && strlen(msg1) != 0 && SoC->Display_lock()) {
-#else
-  if (msg1 != NULL && strlen(msg1) != 0) {
+  if (EPD_update_in_progress == EPD_UPDATE_NONE) {
+//  if (SoC->Display_lock()) {
 #endif
     display->setFont(&FreeMonoBold18pt7b);
 
-    display->fillScreen(GxEPD_WHITE);
+    display->fillScreen(GxEPD_WHITE);   // can be used as "screen saver"
 
-    if (msg2 == NULL) {
+    screen_off = false;
+
+    if (msg2 == NULL && msg1 != NULL && strlen(msg1) != 0) {
 
       display->getTextBounds(msg1, 0, 0, &tbx, &tby, &tbw, &tbh);
       x = (display->width() - tbw) / 2;
@@ -781,19 +790,27 @@ void EPD_Message(const char *msg1, const char *msg2)
       display->setCursor(x, y);
       display->print(msg1);
 
-    } else {
+    } else if (msg1 != NULL && msg2 != NULL) {
 
-      display->getTextBounds(msg1, 0, 0, &tbx, &tby, &tbw, &tbh);
-      x = (display->width() - tbw) / 2;
-      y = display->height() / 2 - tbh;
-      display->setCursor(x, y);
-      display->print(msg1);
+      if (strlen(msg1) != 0) {
+        display->getTextBounds(msg1, 0, 0, &tbx, &tby, &tbw, &tbh);
+        x = (display->width() - tbw) / 2;
+        y = display->height() / 2 - tbh;
+        display->setCursor(x, y);
+        display->print(msg1);
+      }
 
-      display->getTextBounds(msg2, 0, 0, &tbx, &tby, &tbw, &tbh);
-      x = (display->width() - tbw) / 2;
-      y = display->height() / 2 + tbh;
-      display->setCursor(x, y);
-      display->print(msg2);
+      if (strlen(msg2) != 0) {
+        display->getTextBounds(msg2, 0, 0, &tbx, &tby, &tbw, &tbh);
+        x = (display->width() - tbw) / 2;
+        y = display->height() / 2 + tbh;
+        display->setCursor(x, y);
+        display->print(msg2);
+      }
+
+    } else if (msg1 == NULL && msg2 == NULL) {   // signals screen-saver mode entry
+
+        screen_off = true;                       // leave the screen blank white
     }
 
 #if defined(USE_EPD_TASK)
@@ -801,10 +818,10 @@ void EPD_Message(const char *msg1, const char *msg2)
     EPD_update_in_progress = EPD_UPDATE_FAST;
 //    SoC->Display_unlock();
 //    yield();
-#else
-      display->display(true);
-#endif
   }
+#else
+  display->display(true);
+#endif
 }
 
 EPD_Task_t EPD_Task( void * pvParameters )

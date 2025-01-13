@@ -22,7 +22,7 @@
 
 #include "../../system/SoC.h"
 #include <TinyGPS++.h>
-#include "../../driver/EEPROM.h"
+#include "../../driver/Settings.h"
 #include "../../driver/RF.h"
 #include "../../driver/LED.h"
 #include "../../driver/Buzzer.h"
@@ -552,6 +552,8 @@ void parseRAW(JsonObject root)
 
 #if defined(RASPBERRY_PI) || defined(ARDUINO_ARCH_NRF52)
 
+#if defined(USE_JSON_SETTINGS)
+
 void parseUISettings(JsonObject root)
 {
   const char *key;
@@ -923,5 +925,7 @@ void parseSettings(JsonObject root)
   }
 #endif
 }
+
+#endif // USE_JSON_SETTINGS
 
 #endif /* RASPBERRY_PI || ARDUINO_ARCH_NRF52 */

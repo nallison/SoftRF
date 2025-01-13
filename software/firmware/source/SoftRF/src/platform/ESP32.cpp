@@ -29,6 +29,8 @@
 
 #include "SPIFFS.h"
 
+bool SPIFFS_is_mounted = false;
+
 #if !defined(CONFIG_IDF_TARGET_ESP32S2)
 #include <esp_bt.h>
 #include <BLEDevice.h>
@@ -57,7 +59,7 @@
 #include "../system/Time.h"
 #include "../driver/Buzzer.h"
 #include "../driver/Strobe.h"
-#include "../driver/EEPROM.h"
+#include "../driver/Settings.h"
 #include "../driver/RF.h"
 #include "../driver/WiFi.h"
 #include "../driver/Bluetooth.h"
@@ -66,7 +68,7 @@
 #include "../driver/Battery.h"
 #include "../driver/OLED.h"
 #include "../driver/GNSS.h"
-#include "../driver/SDcard.h"
+#include "../driver/Filesys.h"
 #include "../protocol/data/NMEA.h"
 #include "../protocol/data/IGC.h"
 #include "../protocol/data/GDL90.h"
@@ -113,9 +115,9 @@ U8X8_SSD1306_128X64_NONAME_HW_I2C     u8x8_ttgo (TTGO_V2_OLED_PIN_RST);
 // for T-Beam create two u8x8_ttgo objects, for Wire & Wire1
 //    - default is Wire1 (GPIO 21,22)
 U8X8_SSD1306_128X64_NONAME_2ND_HW_I2C
-   u8x8_ttgo (TTGO_V2_OLED_PIN_RST, TTGO_V2_OLED_PIN_SCL, TTGO_V2_OLED_PIN_SDA);      // GPIO 21,22
+   u8x8_ttgo (TTGO_V2_OLED_PIN_RST, TTGO_V2_OLED_PIN_SCL, TTGO_V2_OLED_PIN_SDA);      // GPIO 22,21
 U8X8_SSD1306_128X64_NONAME_HW_I2C
-   u8x8_ttgo2(TTGO_V2_OLED_PIN_RST, SOC_GPIO_PIN_TBEAM_SCL, SOC_GPIO_PIN_TBEAM_SDA);  // GPIO 13,2
+   u8x8_ttgo2(TTGO_V2_OLED_PIN_RST, SOC_GPIO_PIN_TBEAM_SCL, SOC_GPIO_PIN_TBEAM_SDA);  // GPIO 2,13
 #endif /* CONFIG_IDF_TARGET_ESP32S3 */
 U8X8_OLED_I2C_BUS_TYPE u8x8_heltec(HELTEC_OLED_PIN_RST);
 U8X8_SH1106_128X64_NONAME_HW_I2C u8x8_1_3(U8X8_PIN_NONE);
@@ -233,20 +235,21 @@ static bool ADB_is_open         = false;
 // file system object from SdFat
 FatFileSystem fatfs;
 
-ui_settings_t ui_settings = {
+ui_settings_t ui_settings;
+/* = {
     .units        = UNITS_METRIC,
     .zoom         = ZOOM_MEDIUM,
     .protocol     = PROTOCOL_NMEA,
     .rotate       = ROTATE_0,
     .orientation  = DIRECTION_TRACK_UP,
     .adb          = DB_NONE,
-    .idpref       = ID_TYPE,
+    .epdidpref    = ID_TYPE,
     .vmode        = VIEW_MODE_STATUS,
     .voice        = VOICE_OFF,
     .aghost       = ANTI_GHOSTING_OFF,
     .filter       = TRAFFIC_FILTER_OFF,
     .team         = 0
-};
+}; */
 
 ui_settings_t *ui;
 uCDB<FatFileSystem, File> ucdb(fatfs);
@@ -1113,6 +1116,7 @@ static void ESP32_setup()
       Serial.print(SPIFFS.totalBytes());
       Serial.print(F(", used space: "));
       Serial.println(SPIFFS.usedBytes());
+      SPIFFS_is_mounted = true;
   } else {
       Serial.println(F("An Error has occurred while mounting SPIFFS"));
   }
@@ -2072,33 +2076,7 @@ static bool ESP32_EEPROM_begin(size_t size)
 
 static void ESP32_EEPROM_extension(int cmd)
 {
-  if (cmd == EEPROM_EXT_LOAD) {
-#if defined(CONFIG_IDF_TARGET_ESP32) || defined(USE_USB_HOST)
-    if (settings->nmea_out == DEST_USB) {
-      settings->nmea_out = DEST_UART;
-    }
-    if (settings->gdl90 == DEST_USB) {
-      settings->gdl90 = DEST_UART;
-    }
-    if (settings->gdl90_in == DEST_USB) {
-      settings->gdl90_in = DEST_UART;
-    }
-#if !defined(EXCLUDE_D1090)
-    if (settings->d1090 == DEST_USB) {
-      settings->d1090 = DEST_UART;
-    }
-#endif
-#endif /* CONFIG_IDF_TARGET_ESP32 */
-#if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32S3)
-    if (settings->bluetooth != BLUETOOTH_OFF) {
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
-      settings->bluetooth = BLUETOOTH_LE_HM10_SERIAL;
-#else
-      settings->bluetooth = BLUETOOTH_OFF;
-#endif /* CONFIG_IDF_TARGET_ESP32S3 */
-    }
-#endif /* CONFIG_IDF_TARGET_ESP32S2 || CONFIG_IDF_TARGET_ESP32S3 */
-  }
+    // nothing to do
 }
 
 static void ESP32_SPI_begin()
@@ -2310,6 +2288,13 @@ static byte ESP32_Display_setup()
 
       uint8_t shift_y = (hw_info.model == SOFTRF_MODEL_PRIME_MK3 ? 1 : 0);
 
+      const char SoftRF_text1[]  = "SoftRF";
+      const char SoftRF_text2[]  = "and";
+      const char SoftRF_text3[]  = "LilyGO";
+      const char DFLT_text[]     = "DFLT";
+      const char USER_text[]     = "USER";
+      const char PROM_text[]     = "PROM";
+
       if (shift_y) {
         u8x8->draw2x2String( 2, 2 - shift_y, SoftRF_text1);
         u8x8->drawString   ( 6, 3, SoftRF_text2);
@@ -2324,7 +2309,10 @@ static byte ESP32_Display_setup()
             u8x8->draw2x2String( 2, 1, SoftRF_text1);
         u8x8->drawString( 1, 4, "ver");
         u8x8->draw2x2String( 5, 4, SOFTRF_FIRMWARE_VERSION);
-        u8x8->draw2x2String( 1, 6, default_settings_used==STG_DEFAULT? DFLT_text : USER_text);
+        u8x8->draw2x2String( 1, 6,
+            settings_used==STG_DEFAULT? DFLT_text :
+            settings_used==STG_EEPROM?  PROM_text :
+            USER_text);
         u8x8->drawString( 10, 7, "stgs");
 
       }
@@ -2700,23 +2688,23 @@ static void ESP32_Display_fini(int reason)
   }
 }
 
+int ESP32_VbusVoltage()
+{
+    if (PMU)
+        return PMU->getVbusVoltage();
+    return 0;
+}
+
 /* external Power is available from USB port (VBUS0) */
 bool ESP32_onExternalPower() {
     switch (hw_info.pmu)
     {
     case PMU_AXP192:
-        if (PMU->getVbusVoltage() > 4000) {
-          return true;
-        } else {
-          return false;
-        }
+        //return (PMU->getVbusVoltage() > 4000)
+        return PMU->isVbusIn();
         break;
     case PMU_AXP2101:
-        if (PMU->getVbusVoltage() > 4000) {
-          return true;
-        } else {
-          return false;
-        }
+        return PMU->isVbusIn();
         break;
     case PMU_NONE:
     default:
@@ -2781,20 +2769,18 @@ static float ESP32_Battery_param(uint8_t param)
     break;
 
   case BATTERY_PARAM_CHARGE:
+    // assume a LiPo battery, for which full=4.2, threshold=3.5 and cutoff=3.2
     voltage = Battery_voltage();
-    if (voltage < Battery_cutoff())
+    if (voltage < BATTERY_CUTOFF_LIPO)
       return 0;
-
-    if (voltage > 4.2)
-      return 100;
-
-    if (voltage < 3.6) {
-      voltage -= 3.3;
-      return (voltage * 100) / 3;
+    if (voltage > BATTERY_FULL_LIPO)
+      return 100.0;
+    if (voltage < BATTERY_THRESHOLD_LIPO) {
+      return ((voltage - BATTERY_CUTOFF_LIPO)
+          * (10.0 / (BATTERY_THRESHOLD_LIPO - BATTERY_CUTOFF_LIPO)));   // 0 to 10% over 0.3V
     }
-
-    voltage -= 3.6;
-    rval = 10 + (voltage * 150 );
+    return (10.0 + (voltage - BATTERY_THRESHOLD_LIPO)
+                 * (90.0 / (BATTERY_FULL_LIPO - BATTERY_THRESHOLD_LIPO)));   // 10 to 100% over 0.7V
     break;
 
   case BATTERY_PARAM_VOLTAGE:
@@ -2982,9 +2968,9 @@ void handleEvent(AceButton* button, uint8_t eventType,
               OLED_msg("ALARM", " DEMO");
 #if defined(USE_SD_CARD)
               closeSDlog();
-              if (settings->logflight == FLIGHT_LOG_ALWAYS)
-                closeFlightLog();
 #endif
+              //if (settings->logflight == FLIGHT_LOG_ALWAYS)
+              completeFlightLog();
           }
       }
       break;
@@ -3453,7 +3439,7 @@ static bool ESP32_ADB_query(uint8_t type, uint32_t id, char *buf, size_t size)
       }
       out[i] = 0;
 
-      switch (ui->idpref)
+      switch (ui->epdidpref)
       {
       case ID_TAIL:
         snprintf(buf, size, "CN: %s",

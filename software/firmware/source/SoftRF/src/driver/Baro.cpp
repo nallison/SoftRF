@@ -19,7 +19,7 @@
 #include "../system/SoC.h"
 
 #include "Baro.h"
-#include "EEPROM.h"
+#include "Settings.h"
 #include "Battery.h"
 #include "../protocol/data/NMEA.h"
 
@@ -212,12 +212,15 @@ static void bmp280_setup()
     Serial.println(F(" *C"));
 
     Baro_pressure_cache = (float) bmp280.readPressure();
+    // first reading often way off, wait and do another one:
+    delay(1000);
+    Baro_pressure_cache = (float) bmp280.readPressure();
     Serial.print(F("Pressure = "));
     Serial.print(Baro_pressure_cache);
     Serial.println(F(" Pa"));
 
-    Serial.print(F("Approx altitude = "));
-    Serial.print(bmp280.readAltitude(1013.25)); // this should be adjusted to your local forcase
+    Serial.print(F("Altitude using pow() = "));
+    Serial.print(bmp280.readAltitude(1013.25)); // this should be adjusted to your local pressure
     Serial.println(F(" m"));
     Serial.print(F("Altitude using polynomial = "));
     Serial.print(altitude_from_pressure());
@@ -389,18 +392,17 @@ void Baro_loop()
 
     ThisAircraft.pressure_altitude = Baro_altitude_cache;
     ThisAircraft.baro_alt_diff = ThisAircraft.altitude - ThisAircraft.pressure_altitude;
-
 #if !defined(EXCLUDE_LK8EX1)
-    if (settings->nmea_s || settings->nmea2_s) {
-      char str_Vcc[6];
-      dtostrf(Battery_voltage(), 3, 1, str_Vcc);
-      snprintf_P(NMEABuffer, sizeof(NMEABuffer), PSTR("$LK8EX1,%d,%.2f,%d,%d,%s*"),
+    if (settings->mode == SOFTRF_MODE_MORENMEA && (settings->nmea_s || settings->nmea2_s)) {
+      snprintf_P(NMEABuffer, sizeof(NMEABuffer), PSTR("$LK8EX1,%d,%.2f,%d,%d,%d*"),
             (int)Baro_pressure_cache,                                      /* Pascals */
             Baro_altitude_cache,                                           /* meters */
             (int) (ThisAircraft.vs * (100 / (_GPS_FEET_PER_METER * 60))),  /* cm/s   */
             constrain((int) Baro_temperature(), -99, 98),                  /* deg. C */
-            str_Vcc);
+            1000+(int)Battery_charge());
+            // - LK8000 specs say send percent instead of volts as an integer, percent+1000
       int nmealen = NMEA_add_checksum();
+      NMEA_Source = DEST_NONE;
       NMEA_Outs(settings->nmea_s, settings->nmea2_s, NMEABuffer, nmealen, false);
     }
 #endif /* EXCLUDE_LK8EX1 */

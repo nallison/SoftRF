@@ -34,7 +34,7 @@ void  Buzzer_fini()        {}
 
 #include "Buzzer.h"
 #include "Strobe.h"
-#include "EEPROM.h"
+#include "Settings.h"
 #include "OLED.h"
 
 /* need this for the alarm levels enum: */

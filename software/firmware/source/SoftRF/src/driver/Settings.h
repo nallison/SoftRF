@@ -1,6 +1,7 @@
 /*
- * EEPROMHelper.h
+ * Settings.h - formerly EEPROMHelper.h
  * Copyright (C) 2016-2021 Linar Yusupov
+ * Changed by Moshe Braner 2024 to storing settings in a text file
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -16,8 +17,8 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef EEPROMHELPER_H
-#define EEPROMHELPER_H
+#ifndef SETTINGS_H
+#define SETTINGS_H
 
 #include "../../SoftRF.h"
 
@@ -46,6 +47,19 @@
 #define SOFTRF_EEPROM_MAGIC   0xBABADEDA
 #define SOFTRF_EEPROM_VERSION 0xACAC0B0D
 #define SOFTRF_SETTINGS_VERSION 1
+
+#if defined(ESP32)
+#define ABANDON_EEPROM
+#endif
+
+#if defined(ARDUINO_ARCH_NRF52)
+#define ABANDON_EEPROM
+#endif
+
+#if defined(ABANDON_EEPROM)
+// the "ui" settings have been appended into "settings"
+#define ui settings
+#endif
 
 enum
 {
@@ -162,18 +176,23 @@ enum stgidx {
     STG_IGNORE_ID,
     STG_FOLLOW_ID,
     STG_ALARM,
+    STG_HRANGE,
+    STG_VRANGE,
     STG_TXPOWER,
     STG_VOLUME,
-    STG_STROBE,
     STG_POINTER,
+//#if defined(ESP32)
+    STG_STROBE,
     STG_VOICE,
-    STG_BLUETOOTH,
     STG_OWNSSID,
     STG_EXTSSID,
     STG_PSK,
     STG_HOST_IP,
     STG_TCPMODE,
     STG_TCPPORT,
+//#endif
+    STG_BLUETOOTH,
+    STG_BAUD_RATE,
     STG_NMEA_OUT,
     STG_NMEA_G,
     STG_NMEA_P,
@@ -181,6 +200,7 @@ enum stgidx {
     STG_NMEA_S,
     STG_NMEA_D,
     STG_NMEA_E,
+//#if defined(ESP32)
     STG_NMEA_OUT2,
     STG_NMEA2_G,
     STG_NMEA2_P,
@@ -188,7 +208,6 @@ enum stgidx {
     STG_NMEA2_S,
     STG_NMEA2_D,
     STG_NMEA2_E,
-    STG_BAUD_RATE,
     STG_ALTPIN0,
     STG_BAUDRATE2,
     STG_INVERT2,
@@ -196,7 +215,10 @@ enum stgidx {
     STG_RX1090,
     STG_RX1090X,
     STG_MODE_S,
+    STG_HRANGE1090,
+    STG_VRANGE1090,
     STG_GDL90_IN,
+//#endif
     STG_GDL90,
     STG_D1090,
     STG_RELAY,
@@ -206,15 +228,31 @@ enum stgidx {
     STG_POWER_EXT,
     STG_RFC,
     STG_ALARMLOG,
+//#if defined(ESP32)
     STG_GNSS_PINS,
     STG_PPSWIRE,
     STG_SD_CARD,
+//#endif
     STG_LOGFLIGHT,
     STG_LOGINTERVAL,
+    STG_IGC_PILOT,
+    STG_IGC_TYPE,
+    STG_IGC_REG,
+    STG_IGC_CS,
     STG_GEOID,
     STG_JSON,
+//#if defined(USE_EPAPER)
+    STG_EPD_UNITS,
+    STG_EPD_ZOOM,
+    STG_EPD_ROTATE,
+    STG_EPD_ORIENT,
+    STG_EPD_ADB,
+    STG_EPD_IDPREF,
+    STG_EPD_VMODE,
+    STG_EPD_AGHOST,
+    STG_EPD_TEAM,
+//#endif
     STG_DEBUG_FLAGS,
-// >>> for nRF52 also need UI settings
     STG_END
 };
 
@@ -224,7 +262,7 @@ enum stgtyp {
     STG_UINT1 = -2,
     STG_INT1  = -1,
     STG_VOID  = 0,
-    STG_STR    // strings are coded using their length
+    STG_STR    // strings' "type" equals their length
 };
 
 struct setting_struct {
@@ -319,78 +357,91 @@ typedef struct Settings {
     uint8_t  mode;
     uint8_t  rf_protocol;
     uint8_t  band;
-    uint8_t  txpower;
-    uint8_t  volume;
     uint8_t  acft_type;
-
-    int8_t   geoid;
-
+    uint8_t  alarm;
+    uint8_t  hrange;
+    uint8_t  vrange;
+    uint8_t  txpower;
+    uint8_t  id_method;
+    uint32_t aircraft_id;
+    uint32_t ignore_id;
+    uint32_t follow_id;
+    uint8_t  volume;
+    uint8_t  pointer;
+    uint8_t  bluetooth;     // no effect on T-Echo?  (always BLE, always active?)
+    uint8_t  baud_rate;
+    uint8_t  nmea_out;
     bool     nmea_g;
     bool     nmea_p;
     bool     nmea_l;
     bool     nmea_s;
     bool     nmea_d;
-    uint8_t  nmea_out;
-
-    uint8_t  bluetooth;
-    uint8_t  alarm;
-    bool     stealth;
-    bool     no_track;
-
-    uint8_t  gdl90;      // output destination
-    uint8_t  d1090;
-    uint8_t  json;
-
-    uint8_t  pointer;
-    uint8_t  power_save;
-    uint8_t  power_ext;  /* if nonzero, shuts down if battery is not full */
-    uint8_t  rx1090;
-    uint8_t  rx1090x;    // settings for the ADS-B receiver module
-    bool     mode_s;
-
-    uint8_t  gnss_pins;
-    uint8_t  sd_card;      // gpio pins for SD card adapter
-    uint8_t  logflight;
-    uint8_t  loginterval;
-
-    int8_t   freq_corr; /* +/-, kHz */   // <<< limited to +-30, so can liberate two bits
-    uint8_t  relay;
-    uint8_t  gdl90_in;    // data from this port will be interpreted as GDL90
-    uint8_t  alt_udp;     // if 1 then use 10111 instead of 10110
     bool     nmea_e;
-    bool     nmea2_e;     // whether to send bridged data
-    uint8_t  baud_rate;
     uint8_t  baudrate2;
-    bool     invert2;     // whether to invert the logic levels on UART2
-    bool     altpin0;     // whether to use a different pin for UART0 RX
-
-    /* encryption key provided by gliding contest organizer */
-    uint32_t igc_key[4];
-
-    /* added to allow setting aircraft ID and also an ID to ignore */
-    uint32_t aircraft_id;
-    uint8_t  id_method;
-    uint8_t  debug_flags;   /* each bit activates output of some debug info */
-    uint32_t ignore_id;
-    uint8_t  strobe;
-    bool    logalarms;
-    uint8_t  voice;
-    uint8_t  tcpport;
-    uint8_t  tcpmode;
-    bool     ppswire;
-    uint32_t follow_id;
-
+    uint8_t  nmea_out2;
     bool     nmea2_g;
     bool     nmea2_p;
     bool     nmea2_l;
     bool     nmea2_s;
     bool     nmea2_d;
-    uint8_t  nmea_out2;
+    bool     nmea2_e;     // whether to send bridged data
+    bool     stealth;
+    bool     no_track;
+    uint8_t  gdl90;      // output destination
+    uint8_t  d1090;
+    uint8_t  json;
+    int8_t   geoid;
+    int8_t   freq_corr; /* +/-, kHz */   // <<< limited to +-30, so can liberate two bits
+    uint8_t  relay;
+    bool    logalarms;
+    uint8_t  debug_flags;   /* each bit activates output of some debug info */
 
+//#if defined(ESP32)
+    uint8_t  strobe;
+    uint8_t  voice;
     char    myssid[20];    // if using AP mode
     char    ssid[20];      // if connecting to external network
     char    psk[20];
     char    host_ip[16];
+    uint8_t  alt_udp;     // if 1 then use 10111 instead of 10110
+    uint8_t  tcpmode;
+    uint8_t  tcpport;
+    uint8_t  power_save;
+    uint8_t  power_ext;  /* if nonzero, shuts down if battery is not full */
+    uint8_t  rx1090;
+    uint8_t  rx1090x;    // settings for the ADS-B receiver module
+    bool     mode_s;
+    uint8_t  hrange1090;  // km
+    uint8_t  vrange1090;  // hundreds of meters
+    uint8_t  gdl90_in;    // data from this port will be interpreted as GDL90
+    uint8_t  gnss_pins;
+    bool     ppswire;
+    uint8_t  sd_card;      // gpio pins for SD card adapter
+    bool     invert2;     // whether to invert the logic levels on UART2
+    bool     altpin0;     // whether to use a different pin for UART0 RX
+//#endif
+    uint8_t  logflight;
+    uint8_t  loginterval;
+    char     igc_pilot[32];
+    char     igc_type[20];
+    char     igc_reg[12];
+    char     igc_cs[8];
+
+    /* encryption key provided by contest organizers */
+    uint32_t igc_key[4];
+
+//#if defined(USE_EPAPER)
+    // EPD UI settings
+    uint8_t  units;
+    uint8_t  zoom;
+    uint8_t  rotate;
+    uint8_t  orientation;
+    uint8_t  adb;
+    uint8_t  epdidpref;
+    uint8_t  viewmode;
+    uint8_t  antighost;
+    uint32_t team;
+//#endif
 
 } settings_t;
 
@@ -413,10 +464,13 @@ typedef union EEPROM_U {
 #define DEBUG_DEEPER 0x10
 #define DEBUG_SIMULATE 0x20
 
-void EEPROM_setup(void);
-void EEPROM_defaults(void);
+void Adjust_Settings(void);
+void Settings_setup(void);
+void Settings_defaults(bool keepsome);
 void EEPROM_store(void);
-bool try_match_setting(const char *label, const char *value, const int index);
+int  find_setting(const char *label);
+bool load_setting(const int index, const char *value);
+bool format_setting(const int index, const bool comment);
 void show_settings_serial(void);
 void save_settings_to_file(void);
 bool load_settings_from_file(void);
@@ -427,7 +481,7 @@ enum stg_default {
     STG_EEPROM  = 1,
     STG_FILE    = 2
 };
-extern uint8_t default_settings_used;
+extern uint8_t settings_used;
 
 extern settings_t *settings;
 extern setting_struct stgdesc[STG_END];
@@ -437,4 +491,4 @@ extern bool test_mode;
 extern bool landed_out_mode;
 extern int8_t geoid_from_setting;
 
-#endif /* EEPROMHELPER_H */
+#endif /* SETTINGS_H */

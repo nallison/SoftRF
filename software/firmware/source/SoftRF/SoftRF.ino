@@ -79,9 +79,9 @@
 #include "src/driver/RF.h"
 #include "src/driver/Buzzer.h"
 #include "src/driver/Strobe.h"
-#include "src/driver/EEPROM.h"
+#include "src/driver/Settings.h"
 #include "src/driver/Battery.h"
-#include "src/driver/SDcard.h"
+#include "src/driver/Filesys.h"
 #include "src/protocol/data/MAVLink.h"
 #include "src/protocol/data/GDL90.h"
 #include "src/protocol/data/GNS5892.h"
@@ -177,11 +177,15 @@ void setup()
   Serial.println(SoC->getResetReason());
   Serial.print(F("Free heap size: ")); Serial.println(SoC->getFreeHeap());
   Serial.println(SoC->getResetInfo()); Serial.println("");
+#if defined(ESP32)
+  Serial.print(F("Memory available in PSRAM before setup: "));
+  Serial.println(ESP.getFreePsram());
+#endif
 
-  // EEPROM_setup() needs to be done after Serial is working
-  EEPROM_setup();
+  // Settings_setup() needs to be done after Serial is working
+  Settings_setup();
 
-  // can only do the setup()s below after EEPROM_setup(), to know the settings,
+  // can only do the setup()s below after Settings_setup(), to know the settings,
 
   uint32_t SerialBaud = baudrates[settings->baud_rate];
   if (SerialBaud == 0)    // BAUD_DEFAULT
@@ -232,19 +236,6 @@ void setup()
     ThisAircraft.addr = settings->aircraft_id;
   } else {
     uint32_t id = SoC->getChipId() & 0x00FFFFFF;
-#if 0
-    // already done in SoC->getChipId():
-    /* remap address to avoid overlapping with congested FLARM range */
-    if (id >= 0x00DD0000 && id <= 0x00DFFFFF) {
-      id += 0x00100000;
-    /*
-     * OGN 0.2.8+ does not decode 'Air V6' traffic when leading byte of 24-bit Id is 0x5B
-     * Remap 11xxxx addresses to avoid overlapping with congested Skytraxx range
-     */
-    } else if ((id & 0x00FF0000) == 0x005B0000 || (id & 0x00FF0000) == 0x00110000) {
-      id += 0x00010000;
-    }
-#endif
     ThisAircraft.addr = id;
   }
 Serial.printf("\r\nID_method: %d, settings_ID: %06X, used_ID: %06X\r\n\r\n",
@@ -256,20 +247,29 @@ settings->id_method, settings->aircraft_id, ThisAircraft.addr);
   hw_info.display = SoC->Display_setup();
 
 Serial.println(F("calling Baro_setup()..."));
-  // do this before SD_setup since this tickles pins 13,2
+  // do this before Filesys_setup since this tickles pins 13,2
   hw_info.baro = Baro_setup();
 Serial.println(F("... Baro_setup() returned"));
 
-#if defined(USE_SD_CARD)
-  if (hw_info.model == SOFTRF_MODEL_PRIME_MK2) {
+//#if defined(USE_SD_CARD)
+  //if (hw_info.model == SOFTRF_MODEL_PRIME_MK2) {
     // do this before RF_setup() to make sure that:
     // - SD card get started without interference
     // - radio chip sets SPI the way it wants it
-    SD_setup();
+    Filesys_setup();
     delay(200);
-    FlightLog_setup();
-  }
+#if defined(ESP32)
+Serial.print("Memory available in PSRAM before FlightLog_setup(): ");
+Serial.println(ESP.getFreePsram());
 #endif
+    if (settings->logflight != FLIGHT_LOG_NONE)
+        FlightLog_setup();
+  //}
+#if defined(ESP32)
+Serial.print("Memory available in PSRAM after FlightLog_setup(): ");
+Serial.println(ESP.getFreePsram());
+#endif
+//#endif
 
   hw_info.rf = RF_setup();
   delay(100);
@@ -366,24 +366,34 @@ Serial.println(F("... Baro_setup() returned"));
 
   SoC->WDT_setup();
 
-//Serial.println("... setup() done");
+Serial.println("... setup() done");
 //Serial.print("hw_info.model=");
 //Serial.print(hw_info.model);
 //Serial.print(", revision=");
 //Serial.println(hw_info.revision);
+Serial.print("reset.reason=");
+Serial.println(resetInfo->reason);
+Serial.print("reset_reason=");
+Serial.println(SoC->getResetReason());
+Serial.print("reset_info=");
+Serial.println(SoC->getResetInfo());
+#if defined(ESP32)
+Serial.print("Memory available in PSRAM after setup: ");
+Serial.println(ESP.getFreePsram());
+#endif
+Serial.print("settings_used=");
+Serial.println(settings_used);
 
   SetupTimeMarker = millis();
 }
 
 void shutparts()
 {
-#if defined(USE_SD_CARD)
-  closeSDlog();
   closeFlightLog();
-#endif
-#if defined(ESP32)
   if (AlarmLogOpen)
     AlarmLog.close();
+#if defined(USE_SD_CARD)
+  closeSDlog();
 #endif
 #if !defined(SERIAL_FLUSH)
 #define SERIAL_FLUSH()       Serial.flush()
@@ -391,16 +401,14 @@ void shutparts()
   SERIAL_FLUSH();
   SoC->swSer_enableRx(false);
 #if defined(ESP32)
-  if (AlarmLogOpen)
-     AlarmLog.close();
   Voice_fini();
-#endif
   Buzzer_fini();
   Strobe_fini();
-  RF_Shutdown();
   Web_fini();
   NMEA_fini();
   WiFi_fini();
+#endif
+  RF_Shutdown();
   SoC->WDT_fini();
   if (SoC->Bluetooth_ops)
      SoC->Bluetooth_ops->fini();
@@ -474,9 +482,9 @@ void normal()
             validfix = false;
         if (fabs(gnss.location.lng()-prev_lon) > 0.25)
             validfix = false;
+#if 0
 #if defined(ESP32)
 #if defined(USE_SD_CARD)
-#if 0
         // compute course and compare with what TinyGPS says
         if (validfix && ThisAircraft.airborne) {
           float dy = (gnss.location.lat() - prev_lat);
@@ -599,6 +607,7 @@ void normal()
       // >>> do this here too to ensure no incoming packets are missed
       rx_tried = true;
       rx_success = RF_Receive();
+if (rx_success) which_rx_try = 1;
       // if received a packet, postpone transmission until next time around the loop().
 
       if (!rx_success && RF_Transmit_Ready() && (!relay_waiting || RF_current_slot != 0)) {
@@ -634,9 +643,15 @@ void normal()
 
   if ((settings->debug_flags & DEBUG_SIMULATE) == 0) {
 
+#if 1
+// >>> this may be causing "RF loopback" on sx1262?
+// - nope still get some loopbacks in try1
+// - but with this code included it only happens in try2?
     // ensure receiver is re-activated
     if (!rx_tried || tx_success)
       rx_success = RF_Receive();
+if (rx_success) which_rx_try = 2;
+#endif
 
 //if (rx_success)
 //Serial.println("received packet...");
@@ -659,27 +674,32 @@ void normal()
     Traffic_loop();
   }
 
-#if defined(ESP32)
-#if defined(USE_SD_CARD)
-  if (settings->logflight != FLIGHT_LOG_NONE) {
+  if (validfix && settings->logflight != FLIGHT_LOG_NONE) {
     // Try and write to the flight log on the SD card between RF time slots (to avoid
-    //  contention for the SPI bus), but after the GNSS fix for the current second.
+    // contention with RF chip for the SPI bus, if SD adapter is on same bus on a T-Beam),
+    // but after the GNSS fix for the current second.
     // This is not an issue in simulation mode since the radio is not being used.
     // Too tight a limit on the reporting time window results in some missing reports.
     uint32_t msnow = millis();
+#if defined(ESP32)
     uint32_t ms_since_pps = (msnow - ref_time_ms);
     if (msnow > IGCTimeMarker && ms_since_pps > 270
             && ms_since_pps < ((settings->debug_flags & DEBUG_SIMULATE)? 800 : 370)) {
-      if (validfix) {
-          logFlightPosition();
-          if (settings->logflight == FLIGHT_LOG_TRAFFIC)
-              logCloseTraffic();
-      }
+      logFlightPosition();
+      if (settings->logflight == FLIGHT_LOG_TRAFFIC)
+          logCloseTraffic();
       IGCTimeMarker = ref_time_ms + (1000 << (settings->loginterval)) + 320;
     }
+#else
+    // on T-Echo don't worry about SPI bus
+    if (msnow > IGCTimeMarker) {
+      logFlightPosition();
+      if (settings->logflight == FLIGHT_LOG_TRAFFIC)
+          logCloseTraffic();
+      IGCTimeMarker = ref_time_ms + (1000 << (settings->loginterval)) + 320;
+    }
+#endif
   }
-#endif
-#endif
 
   if (isTimeToDisplay()) {
     if (validfix) {

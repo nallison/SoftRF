@@ -126,11 +126,13 @@ void EPD_time_loop()
 
     // show the latest max RSSI
     int acrfts_counter = Traffic_Count();   // maxrssi is a byproduct
-    snprintf(buf_hm,  sizeof(buf_hm),  "max RSSI %d", maxrssi);
-    display->setFont(&FreeMonoBold12pt7b);
-    display->getTextBounds(buf_hm, 0, 0, &tbx, &tby, &tbw, &tbh);
-    display->setCursor((display->width() - tbw) / 2, display->height() - 20);
-    display->print(buf_hm);
+    if (maxrssi < 0) {
+      snprintf(buf_hm,  sizeof(buf_hm),  "max RSSI %d", maxrssi);
+      display->setFont(&FreeMonoBold12pt7b);
+      display->getTextBounds(buf_hm, 0, 0, &tbx, &tby, &tbw, &tbh);
+      display->setCursor((display->width() - tbw) / 2, display->height() - 20);
+      display->print(buf_hm);
+    }
 
 #if defined(USE_EPD_TASK)
     /* a signal to background EPD update task */

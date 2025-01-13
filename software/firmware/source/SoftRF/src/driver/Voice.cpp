@@ -41,7 +41,7 @@ void  Voice_fini()        {}
 #include "Voice.h"
 #include "Buzzer.h"
 #include "Strobe.h"
-#include "EEPROM.h"
+#include "Settings.h"
 
 // #include "../platform/ESP32.h"  // included indirectly via SoC.h
 

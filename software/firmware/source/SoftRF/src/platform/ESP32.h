@@ -504,10 +504,13 @@ struct rst_info {
 bool ESP32_pin_reserved(uint8_t pin, bool shared, const char *label);
 void ESP32_pin_unreserve(uint8_t pin);
 bool ESP32_onExternalPower();
+int  ESP32_VbusVoltage();
 void blue_LED_on();
 void blue_LED_off();
 void blue_LED_1hz();
 void blue_LED_4hz();
+
+extern bool SPIFFS_is_mounted;
 
 // for experiment
 //extern bool button_pressed;
