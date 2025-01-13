@@ -30,7 +30,7 @@
 // which does #include "../../SoftRF.h"
 #include "../../system/Time.h"
 #include "../../driver/WiFi.h"
-#include "../../driver/EEPROM.h"
+#include "../../driver/Settings.h"
 #include "../../driver/RF.h"
 #include "../../driver/Battery.h"
 #include "../../driver/Baro.h"
@@ -40,7 +40,7 @@
 #endif
 #include "../../driver/Bluetooth.h"
 #if defined(USE_SD_CARD)
-#include "../../driver/SDcard.h"
+#include "../../driver/Filesys.h"
 #endif
 #include "../../TrafficHelper.h"
 
@@ -263,12 +263,17 @@ TinyGPSCustom F_tcpport;
 TinyGPSCustom F_geoid;
 TinyGPSCustom F_freq_corr;  /* 15 */
 
+// one setting at a time:
+TinyGPSCustom S_Version;
+TinyGPSCustom S_label;
+TinyGPSCustom S_value;
+
 TinyGPSCustom T_testmode;
 
 #if defined(USE_OGN_ENCRYPTION)
 /* Security and privacy */
-TinyGPSCustom S_Version;
-TinyGPSCustom S_IGC_Key;
+TinyGPSCustom K_Version;
+TinyGPSCustom K_IGC_Key;
 #endif /* USE_OGN_ENCRYPTION */
 
 #if defined(USE_SKYVIEW_CFG)
@@ -379,10 +384,10 @@ void sendPFLAV(bool nowait)
 }
 
 // copy into plain static variables for efficiency in NMEA_Loop():
-bool is_a_prime_mk2 = false;
+static bool is_a_prime_mk2 = false;
+static unsigned int UDP_NMEA_Output_Port = NMEA_UDP_PORT;
 bool has_serial2 = false;
 bool rx1090found = false;
-static unsigned int UDP_NMEA_Output_Port = NMEA_UDP_PORT;
 
 void NMEA_setup()
 {
@@ -504,17 +509,23 @@ void NMEA_setup()
   F_geoid.begin         (gnss, psrf_f, term_num++);
   F_freq_corr.begin     (gnss, psrf_f, term_num++); /* 15 */
 
+
+  const char *psrf_s = "PSRFS";
+  term_num = 1;
+  S_Version.begin       (gnss, psrf_s, term_num++);
+  S_label.begin         (gnss, psrf_s, term_num++);
+  S_value.begin         (gnss, psrf_s, term_num++);
+
   const char *psrf_t = "PSRFT";
   term_num = 1;
-  T_testmode.begin      (gnss, psrf_t, term_num++); /* 1 */
+  T_testmode.begin      (gnss, psrf_t, term_num++);
 
 #if defined(USE_OGN_ENCRYPTION)
 /* Security and privacy */
-  const char *psrf_s = "PSRFS";
+  const char *psrf_k = "PSRFK";
   term_num = 1;
-
-  S_Version.begin      (gnss, psrf_s, term_num++);
-  S_IGC_Key.begin      (gnss, psrf_s, term_num  );
+  K_Version.begin      (gnss, psrf_k, term_num++);
+  K_IGC_Key.begin      (gnss, psrf_k, term_num  );
 #endif /* USE_OGN_ENCRYPTION */
 
 #if defined(USE_SKYVIEW_CFG)
@@ -586,11 +597,16 @@ void NMEA_setup()
 void NMEA_Out(uint8_t dest, const char *buf, size_t size, bool nl)
 {
 #if 0
+if (NMEA_Source != DEST_NONE) {     // only external sources
   Serial.print("NMEA_Out(");
+  Serial.print(NMEA_Source);
+  Serial.print(",");
   Serial.print(dest);
   Serial.print("): ");
-  Serial.write(buf, size);
+  //Serial.write(buf, size);
+  Serial.print(buf);
   if (nl) Serial.print("\r\n");
+}
 #endif
 
   if (dest == NMEA_Source)          // do not echo NMEA back to its source
@@ -603,6 +619,8 @@ void NMEA_Out(uint8_t dest, const char *buf, size_t size, bool nl)
   {
   case DEST_UART:
     {
+      if (NMEA_Source == DEST_USB)   // do not echo USB to UART
+        return; 
       if (SoC->UART_ops) {
         SoC->UART_ops->write((const byte*) buf, size);
         if (nl)
@@ -650,8 +668,11 @@ void NMEA_Out(uint8_t dest, const char *buf, size_t size, bool nl)
 #endif
     }
     break;
+#if defined(ARDUINO_ARCH_NRF52)
   case DEST_USB:
     {
+      if (NMEA_Source == DEST_UART)   // do not echo UART to USB
+        return; 
       if (SoC->USB_ops) {
         SoC->USB_ops->write((const byte *) buf, size);
         if (nl)
@@ -659,6 +680,7 @@ void NMEA_Out(uint8_t dest, const char *buf, size_t size, bool nl)
       }
     }
     break;
+#endif
   case DEST_BLUETOOTH:
     {
       if (BTactive && SoC->Bluetooth_ops) {
@@ -701,10 +723,11 @@ bool NMEA_bridge_sent = false;
 void NMEA_bridge_send(char *buf, int len)
 {
 #if 0
-    Serial.print("bridge_send(");
+    Serial.print("bridge_send(source=");
     Serial.print(NMEA_Source);
     Serial.print("): ");
-    Serial.write(buf, len);
+    //Serial.write(buf, len);
+    Serial.print(buf);
 #endif
     // First check whether it is GNSS or FLARM sentences, skip them (assume echo)
     if (buf[1]=='G' && buf[2]=='P')
@@ -726,21 +749,30 @@ void NMEA_bridge_send(char *buf, int len)
             if (buf[len-4] != c1 || buf[len-3] != c2) {
                 uint8_t dest = NMEA_Source;
                 NMEA_Source = DEST_NONE;
-                NMEA_Out(dest, "-- correct checksum is: ", 24, false);
-                NMEA_Out(dest, buf, len, false);
+                NMEA_Out(dest, "\r\n-- correct checksum is: ", 26, false);
+                NMEA_Out(dest, buf, len, true);   // add blank lines before and after
                 NMEA_Source = dest;
                 return;
             }
         }
-        if (NMEA_encode(buf, len)) {           // valid sentence
+        if (NMEA_encode(buf, len))             // valid sentence
             NMEA_Process_SRF_SKV_Sentences();
-            return;
-        }
+        return;                                // even if not valid sentence
       }
     }
 #endif
 
-    // send to configured outputs, but do not echo to source
+    // remaining are sentences that are NOT GNSS, FLARM or PSRF/PSKV
+    // forward them to configured outputs, but do not echo to source
+
+#if 1
+    Serial.print("bridge_send(source=");
+    Serial.print(NMEA_Source);
+    Serial.print("): ");
+    //Serial.write(buf, len);
+    Serial.print(buf);
+#endif
+
     if (settings->nmea_e && settings->nmea_out != NMEA_Source) {
         NMEA_Out(settings->nmea_out, buf, len, false);
         NMEA_bridge_sent = true;
@@ -751,8 +783,8 @@ void NMEA_bridge_send(char *buf, int len)
     }
 }
 
-// set up separate buffers for potentially-bridged output from each input
-// common code for all these buffers:
+// set up separate buffers for potentially-bridged output from each input port,
+// this is the common code for all these buffers:
 void NMEA_bridge_buf(char c, char* buf, int& n)
 {
     if (c == '$') {
@@ -790,10 +822,6 @@ void NMEA_loop()
 
   NMEA_Source = DEST_NONE;
 
-#if defined(ESP32)
-
-  if (is_a_prime_mk2) {
-
     /*
      * Check SW/HW UARTs, USB, TCP and BT for data
      */
@@ -801,42 +829,54 @@ void NMEA_loop()
     bool gdl90 = false;
 
     if ((settings->debug_flags & DEBUG_SIMULATE) == 0
+#if defined(ESP32)
 #if defined(USE_SD_CARD)
         || SIMfileOpen
 #endif
-        || (settings->gnss_pins != EXT_GNSS_NONE)) {
+        || (settings->gnss_pins != EXT_GNSS_NONE)
+#endif
+        ) {      // if not reading sim data from Serial, poll Serial here:
 
-      // if not reading sim data from Serial, poll Serial here:
-
-#if 0
+#if defined(ARDUINO_ARCH_NRF52)
       static char usb_buf[128+3];
       static int usb_n = 0;
       if (SoC->USB_ops) {
         gdl90 = (settings->gdl90_in == DEST_USB);
-        while (SoC->USB_ops->available() > 0) {
-            NMEA_Source = DEST_USB;
+        while (SoC->USB_ops->available() > 0) {   // may mirror UART?
             int c = SoC->USB_ops->read();
-            if (gdl90)
-                GDL90_bridge_buf(c, usb_buf, usb_n);
-            else
+            //if (settings->nmea_out == DEST_UART || settings->nmea_out2 == DEST_UART)
+            //    continue;
+            NMEA_Source = DEST_USB;
+//#if defined(ESP32)
+//            if (gdl90)
+//                GDL90_bridge_buf(c, usb_buf, usb_n);
+//            else
+//#endif
                 NMEA_bridge_buf(c, usb_buf, usb_n);
         }
       }
 #endif
 
+#if ! defined(ARDUINO_ARCH_NRF52)
       static char uart_buf[128+3];
       static int uart_n = 0;
       gdl90 = (settings->gdl90_in == DEST_UART);
       while (Serial.available() > 0) {
           NMEA_Source = DEST_UART;
           int c = Serial.read();
+#if defined(ESP32)
           if (gdl90)
               GDL90_bridge_buf(c, uart_buf, uart_n);
           else
+#endif
               NMEA_bridge_buf(c, uart_buf, uart_n);
       }
+#endif
 
     }  // end of polling Serial
+
+#if defined(ESP32)
+  if (is_a_prime_mk2) {
 
     static char uart2_buf[128+3];
     static int uart2_n = 0;
@@ -861,6 +901,9 @@ void NMEA_loop()
         }
     }
 
+  }  // end if (is_a_prime_mk2)
+#endif
+
     static char bt_buf[128+3];
     static int bt_n = 0;
     if (SoC->Bluetooth_ops) {
@@ -868,9 +911,11 @@ void NMEA_loop()
       while (BTactive && SoC->Bluetooth_ops->available() > 0) {
           NMEA_Source = DEST_BLUETOOTH;
           int c = SoC->Bluetooth_ops->read();
+#if defined(ESP32)
           if (gdl90)
               GDL90_bridge_buf(c, bt_buf, bt_n);
           else
+#endif
               NMEA_bridge_buf(c, bt_buf, bt_n);
       }
     }
@@ -879,6 +924,8 @@ void NMEA_loop()
         yield();
         return;     // probably not using other wireless, but in any case postpone
     }
+
+#if defined(ESP32)
 
     static char udp_buf[128+3];
     static int udp_n = 0;
@@ -941,14 +988,12 @@ void NMEA_loop()
     }
 #endif
 
+#endif // ESP32
+
     if (NMEA_bridge_sent) {
         yield();
         return;           // process sensors next time around
     }
-
-  }  // end if (is_a_prime_mk2)
-
-#endif
 
   NMEA_Source = DEST_NONE;  // for all internal messages sent below
 
@@ -1064,10 +1109,41 @@ void NMEA_fini()
 
 void NMEA_Export()
 {
+    NMEA_Source = DEST_NONE;
+
+    float voltage = Battery_voltage();
+    if (voltage < BATTERY_THRESHOLD_INVALID)
+        voltage = 0;
+
+#if !defined(EXCLUDE_SOFTRF_HEARTBEAT)
+    static int beatcount = 0;
+    if (++beatcount >= 10) {
+      beatcount = 0;
+      unsigned int nmealen;
+      if (settings->nmea_l || settings->nmea2_l) {
+          int nacft = Traffic_Count();   // maxrssi and adsb_acfts are byproducts
+          snprintf_P(NMEABuffer, sizeof(NMEABuffer),
+                  PSTR("$PSRFH,%06X,%d,%d,%d,%d,%d,%d,%d,%d*"),
+                  ThisAircraft.addr, settings->rf_protocol,
+                  millis(), (int)(voltage*100), SoC->getFreeHeap(),
+                  rx_packets_counter, tx_packets_counter, nacft, maxrssi);
+          nmealen = NMEA_add_checksum();
+          NMEA_Outs(settings->nmea_l, settings->nmea2_l, NMEABuffer, nmealen, false);
+      }
+      // also output an LK8EX1 sentence here if not sent from baro_loop()
+      // - just to report the battery charge percentage
+      // - LK8000 specs say to send percent instead of volts send as an integer, percent+1000
+      if ((settings->nmea_s || settings->nmea2_s) && (baro_chip == NULL)) {
+          snprintf_P(NMEABuffer, sizeof(NMEABuffer), PSTR("$LK8EX1,999999,99999,9999,99,%d*"),
+              1000+(int)Battery_charge());
+          nmealen = NMEA_add_checksum();
+          NMEA_Outs(settings->nmea_s, settings->nmea2_s, NMEABuffer, nmealen, false);
+      }
+    }
+#endif /* EXCLUDE_SOFTRF_HEARTBEAT */
+
     if (! settings->nmea_l && ! settings->nmea2_l)
          return;
-
-    NMEA_Source = DEST_NONE;
 
     container_t *cip, *fop;
     int alt_diff;
@@ -1096,6 +1172,9 @@ void NMEA_Export()
     bool deeper = (settings->debug_flags & DEBUG_DEEPER);
 
     if (has_Fix) {
+
+      float maxdistance = (settings->hrange? 1000 * settings->hrange : 100000);
+      float maxaltdiff  = (settings->vrange?  100 * settings->vrange :  20000);
 
       for (int i=0; i < MAX_TRACKING_OBJECTS; i++) {
 
@@ -1138,8 +1217,10 @@ void NMEA_Export()
                    show = false; */
 
           if ((alarm_level > ALARM_LEVEL_NONE
-               || (distance < ALARM_ZONE_NONE && abs_alt_diff < VERTICAL_VISIBILITY_RANGE)
-               || cip->addr == follow_id || deeper)
+               //|| (distance < ALARM_ZONE_NONE && abs_alt_diff < VERTICAL_VISIBILITY_RANGE)
+               || (cip->tx_type <= TX_TYPE_ADSB)   // filtering done in ADS-B processing
+               || (distance < maxdistance && abs_alt_diff < maxaltdiff)
+               || cip->addr == follow_id)
               && show) {
 
              /* put candidate traffic to report into a sorted list */
@@ -1205,7 +1286,19 @@ void NMEA_Export()
          int dx = fop->dx;
          int dy = fop->dy;
 
-         // if this aircraft not airborne, no-track targets should not be reported,
+         bool stealth = (fop->stealth || ThisAircraft.stealth);  /* reciprocal */
+         if (stealth) {
+            if (abs(alt_diff) > 300)
+                continue;               // do not report this aircraft
+           if (dx*dx + dy*dy > (2000*2000))
+                continue;               // do not report this aircraft
+           id = 0xFFFFF0 + i;            // show as anonymous
+           addr_type = ADDR_TYPE_RANDOM;    // (0) - not ADDR_TYPE_ANONYMOUS
+           if (alarm_level <= ALARM_LEVEL_CLOSE)
+               alt_diff = (alt_diff & 0xFFFFFF00) + 128;   /* fuzzify */
+         }
+
+         // if this aircraft is not airborne, no-track targets should not be reported,
          //  unless the target is closer than 200m horizontally and 100m vertically.
 
          if (fop->no_track && ! ThisAircraft.airborne) {
@@ -1214,6 +1307,9 @@ void NMEA_Export()
            if (dx*dx + dy*dy > (200*200))
                 continue;               // do not report this aircraft
          }
+
+         if (fop->distance > 99000)     // too-far ADS-B aircraft
+             continue;
 
          // If either target or this aircraft is "stealth" then:
          //   course should be empty
@@ -1228,29 +1324,20 @@ void NMEA_Export()
          //   speed should be empty
          //   climbrate should be empty
 
-         bool stealth = (fop->stealth || ThisAircraft.stealth);  /* reciprocal */
-
-         char str_dx[6] = "";
-         char str_climb_rate[8] = "";
-         char str_course[4] = "";
-         char str_speed[4] = "";
+         char str_dx[8];                      // need room for a minus sign
+         snprintf(str_dx, 8, "%d", dx);
+         char str_climb_rate[8];
+         char str_course[4];
+         char str_speed[4];
+         str_climb_rate[0] = '\0';
+         str_course[0] = '\0';
+         str_speed[0] = '\0';
          if (fop->tx_type <= TX_TYPE_S) {     // a non-directional target
              dy = (int) fop->distance;
              if (dy > 2*ALARM_ZONE_LOW && !deeper)
                  continue;                   // only report if close (2000m)
-         } else if (fop->distance > 99000 && !deeper) {
-             continue;
-         } else if (stealth) {
-            if (abs(alt_diff) > 300)
-                continue;               // do not report this aircraft
-           if (dx*dx + dy*dy > (2000*2000))
-                continue;               // do not report this aircraft
-           id = 0xFFFFF0 + i;            // show as anonymous
-           addr_type = ADDR_TYPE_RANDOM;    // (0) - not ADDR_TYPE_ANONYMOUS
-           if (alarm_level <= ALARM_LEVEL_CLOSE)
-               alt_diff = (alt_diff & 0xFFFFFF00) + 128;   /* fuzzify */
-         } else {
-             snprintf(str_dx, 6, "%d", dx);
+             str_dx[0] = '\0';
+         } else if (! stealth) {
              dtostrf(
                constrain(fop->vs / (_GPS_FEET_PER_METER * 60.0), -32.7, 32.7),
                5, 1, str_climb_rate);
@@ -1325,9 +1412,6 @@ void NMEA_Export()
     }
 
     /* One PFLAU NMEA sentence is mandatory regardless of traffic reception status */
-    float voltage = Battery_voltage();
-    if (voltage < BATTERY_THRESHOLD_INVALID)
-        voltage = 0;
     int power_status = (voltage > 0 && voltage < Battery_threshold()) ?
                          POWER_STATUS_BAD : POWER_STATUS_GOOD;
 
@@ -1418,22 +1502,6 @@ if (settings->debug_flags) {
     SD_log(NMEABuffer);
 }
 #endif
-
-    static int beatcount = 0;
-    if (++beatcount < 10)
-        return;
-    beatcount = 0;
-
-#if !defined(EXCLUDE_SOFTRF_HEARTBEAT)
-    int nacft = Traffic_Count();   // maxrssi and adsb_acfts are byproducts
-    snprintf_P(NMEABuffer, sizeof(NMEABuffer),
-            PSTR("$PSRFH,%06X,%d,%d,%d,%d,%d,%d,%d,%d*"),
-            ThisAircraft.addr,settings->rf_protocol,
-            millis(),(int)(voltage*100),ESP.getFreeHeap(),
-            rx_packets_counter,tx_packets_counter,nacft,maxrssi);
-    nmealen = NMEA_add_checksum();
-    NMEA_Outs(settings->nmea_l, settings->nmea2_l, NMEABuffer, nmealen, false);
-#endif /* EXCLUDE_SOFTRF_HEARTBEAT */
 }
 
 #if defined(USE_NMEALIB)
@@ -1588,12 +1656,14 @@ void NMEA_GGA()
 // this is used specifically to respond to the source
 // while NMEA_Out() specifically avoids that,
 // so mask the source
-void nmea_cfg_reply()
+void nmea_cfg_reply(bool blanklines=true)
 {
     unsigned int nmealen = NMEA_add_checksum();
     uint8_t dest = NMEA_Source;
     NMEA_Source = DEST_NONE;
-    NMEA_Out(dest, NMEABuffer, nmealen, false);
+    if (blanklines)
+        NMEA_Out(dest, "\r\n", 2, false);
+    NMEA_Out(dest, NMEABuffer, nmealen, blanklines);
     NMEA_Source = dest;
 }
 
@@ -1721,6 +1791,10 @@ void NMEA_Process_SRF_SKV_Sentences()
       } else if (strncmp(C_Version.value(), "PAG", 3) == 0) {      // $PSRFC,PAG*2E
           Serial.println(F("PSRFC Page Switch"));
           OLED_Next_Page();
+#elif defined(USE_EPAPER)
+      } else if (strncmp(C_Version.value(), "PAG", 3) == 0) {      // $PSRFC,PAG*2E
+          Serial.println(F("PSRFC Page Switch"));
+          EPD_Mode(false);
 #endif
       } else if (strncmp(C_Version.value(), "DEM", 3) == 0) {      // $PSRFC,DEM*34
           Serial.println(F("PSRFC Alarm Demo"));
@@ -1775,7 +1849,7 @@ void NMEA_Process_SRF_SKV_Sentences()
           tryupdate(C_noTrack, STG_NO_TRACK);
           tryupdate(C_PowerSave, STG_POWER_SAVE);
 
-          if (cfg_is_updated)
+          if (cfg_is_updated && atoi(C_Version.value()))
               nmea_cfg_restart(true);
           else
               NMEA_encode("$PSRFC,0,,,,,,,,,,,,,,,,,,*48\r\n", 31);
@@ -1835,7 +1909,7 @@ void NMEA_Process_SRF_SKV_Sentences()
           tryupdate(D_ignore_id, STG_IGNORE_ID);
           tryupdate(D_follow_id, STG_FOLLOW_ID);
 
-          if (cfg_is_updated)
+          if (cfg_is_updated && atoi(D_Version.value()))
               nmea_cfg_restart(true);
           else
               NMEA_encode("$PSRFD,0,,,,,,,,,,,,,,,,,,,,,,,*47\r\n", 36);
@@ -1878,11 +1952,84 @@ void NMEA_Process_SRF_SKV_Sentences()
           tryupdate(F_loginterval, STG_LOGINTERVAL);
 #endif
 
-          if (cfg_is_updated)
+          if (cfg_is_updated && atoi(F_Version.value()))
               nmea_cfg_restart(true);
           else
               NMEA_encode("$PSRFF,0,,,,,,,,,,,,,,,*61\r\n", 28);
       }
+  }
+
+  // one setting at a time
+  if (S_Version.isUpdated()) {
+
+    char version0 = *S_Version.value();
+    char label0 = 0xFF;
+    if (S_label.isUpdated())
+        label0 = *S_label.value();
+
+    if (version0 == '?' || label0 == '?') {   // treat $PSRFS,0,?*xx same as $PSRFS,?*xx
+      // reply in the same format as the settings file, including comments
+      for (int i=STG_MODE; i<STG_END; i++) {
+         if (format_setting(i, true) == false)
+               continue;
+         nmea_cfg_reply(false);  // do not add blank lines between the settings
+         yield();
+      }
+
+    } else if (isdecdigit(&version0)) {
+
+      int i = STG_NONE;
+      if (label0 != 0xFF && label0 != '\0')
+          i = find_setting(S_label.value());
+      if (i == STG_NONE) {
+        snprintf_P(NMEABuffer, sizeof(NMEABuffer),
+            PSTR("%s - no matching label\r\n"), S_label.value());
+        nmea_cfg_reply();
+
+      } else {    // label matches a setting
+
+        bool query = true;      // treat $PSRFS,0,label*xx same as $PSRFS,0,label,?*xx
+        cfg_is_updated = true;  // for non-UINT1 settings assume it's a change
+        bool loaded = false;
+        if (S_value.isUpdated())
+            query = (*S_value.value() == '?');
+        if (! query) {
+            if (stgdesc[i].type == STG_UINT1)
+                cfg_is_updated = (*((uint8_t *)(stgdesc[i].value)) != atoi(S_value.value()));
+            if (cfg_is_updated)
+                loaded = load_setting(i, S_value.value());
+        }
+
+        if (!query && !loaded) {
+          snprintf_P(NMEABuffer, sizeof(NMEABuffer),
+                  PSTR("%s,%s - error\r\n"), S_label.value(), S_value.value());
+          nmea_cfg_reply();
+
+        } else {   // if (query || loaded)
+
+          // reply with a complete $PSRFS sentence (and no setting comment)
+          if (format_setting(i, false) == true) {
+              char buf[sizeof(NMEABuffer)+9];
+              strcpy(buf, "$PSRFS,");
+              if (loaded)
+                  buf[7] = version0;      // digit given after $PSRFS,
+              else
+                  buf[7] = '0';           // signals no change
+              buf[8] = ',';
+              strcpy(buf+9, NMEABuffer);  // format_setting() put its output in NMEABuffer
+              int len = strlen(buf);
+              buf[len-2] = '*';       // overwrite the \r\n from format_setting()
+              buf[len-1] = '\0';
+              strcpy(NMEABuffer, buf);
+              nmea_cfg_reply();           // will output what's now in NMEABuffer
+          }
+
+          // only restart if Version field is nonzero
+          if (loaded && version0 != '0')
+              nmea_cfg_restart(true);
+        }
+      }
+    }
   }
 
   // $PSRFT,0*5F  or  $PSRFT,1*5E  to set test_mode to 0 or 1, or $PSRFT,?*50 to query
@@ -1922,12 +2069,12 @@ void NMEA_Process_SRF_SKV_Sentences()
   }
 
 #if defined(USE_OGN_ENCRYPTION)
-  if (S_Version.isUpdated()) {
+  if (K_Version.isUpdated()) {
 
-      if (strncmp(S_Version.value(), "?", 1) == 0) {
+      if (strncmp(K_Version.value(), "?", 1) == 0) {
 
         snprintf_P(NMEABuffer, sizeof(NMEABuffer),
-            PSTR("$PSRFS,%d,%08X%08X%08X%08X*"),
+            PSTR("$PSRFK,%d,%08X%08X%08X%08X*"),
             PSRFX_VERSION,
             settings->igc_key[0]? 0x88888888 : 0,
             settings->igc_key[1]? 0x88888888 : 0,
@@ -1937,11 +2084,11 @@ void NMEA_Process_SRF_SKV_Sentences()
 
         nmea_cfg_reply();
 
-      } else if (isdecdigit(S_Version.value())) {
+      } else if (isdecdigit(K_Version.value())) {
 
           char buf[32 + 1];
 
-          strncpy(buf, S_IGC_Key.value(), sizeof(buf));
+          strncpy(buf, K_IGC_Key.value(), sizeof(buf));
 
           settings->igc_key[3] = strtoul(buf + 24, NULL, 16);
           buf[24] = 0;
@@ -1958,10 +2105,10 @@ void NMEA_Process_SRF_SKV_Sentences()
 
           Serial.print(F("IGC Key = ")); Serial.println(buf);
 
-          if (atoi(S_Version.value()))
+          if (atoi(K_Version.value()))
               nmea_cfg_restart(true);
           else
-              NMEA_encode("$PSRFS,0,*74\r\n", 14);
+              NMEA_encode("$PSRFK,0,*74\r\n", 14);
       }
   }
 #endif /* USE_OGN_ENCRYPTION */
@@ -1971,45 +2118,46 @@ void NMEA_Process_SRF_SKV_Sentences()
 
       if (strncmp(V_Version.value(), "?", 1) == 0) {
 
+#if defined(ABANDON_EEPROM)
+          snprintf_P(NMEABuffer, sizeof(NMEABuffer),
+            PSTR("$PSKVC,%d,%d,%d,%d,%d,%d,%d,%d,%d,%X*"),
+            PSKVC_VERSION,       settings->units,       settings->zoom,
+            settings->rotate,    settings->orientation, settings->adb,
+            settings->epdidpref, settings->viewmode,    settings->antighost,
+            settings->team);
+#else
           snprintf_P(NMEABuffer, sizeof(NMEABuffer),
             PSTR("$PSKVC,%d,%d,%d,%d,%d,%d,%d,%s,%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%X*"),
             PSKVC_VERSION,  ui->adapter,      ui->connection,
             ui->units,      ui->zoom,         ui->protocol,
             ui->baudrate,   ui->server,       ui->key,
             ui->rotate,     ui->orientation,  ui->adb,
-            ui->idpref,     ui->vmode,        ui->voice,
-            ui->aghost,     ui->filter,       ui->power_save,
+            ui->epdidpref,  ui->viewmode,     ui->voice,
+            ui->antighost,  ui->filter,       ui->power_save,
             ui->team);
-
+#endif
           nmea_cfg_reply();
+
+#if defined(ABANDON_EEPROM)
 
       } else if (isdecdigit(V_Version.value())) {
 
           cfg_is_updated = false;
 
-          tryupdate(V_Adapter, UI_ADAPTER);
-          tryupdate(V_Connection, UI_CONNECTION);
-          tryupdate(V_Units, UI_UNITS);
-          tryupdate(V_Zoom, UI_ZOOM);
-          tryupdate(V_Protocol, UI_PROTOCOL);
-          tryupdate(V_Baudrate, UI_BAUD);
-          tryupdate(V_Server, UI_SERVER);
-          tryupdate(V_Key, UI_KEY);
-          tryupdate(V_Rotate, UI_ROTATE);
-          tryupdate(V_Orientation, UI_ORIENTATION);
-          tryupdate(V_AvDB, UI_ADB);
-          tryupdate(V_ID_Pref, UI_IDPREF);
-          tryupdate(V_VMode, UI_VMODE);
-          tryupdate(V_Voice, UI_VOICE);
-          tryupdate(V_AntiGhost, UI_AGHOST);
-          tryupdate(V_Filter, UI_FILTER);
-          tryupdate(V_PowerSave, UI_POWER_SAVE);
-          tryupdate(V_Team, UI_TEAM);
-
+          tryupdate(V_Units, STG_EPD_UNITS);
+          tryupdate(V_Zoom, STG_EPD_ZOOM);
+          tryupdate(V_Rotate, STG_EPD_ROTATE);
+          tryupdate(V_Orientation, STG_EPD_ORIENT);
+          tryupdate(V_AvDB, STG_EPD_ADB);
+          tryupdate(V_ID_Pref, STG_EPD_IDPREF);
+          tryupdate(V_VMode, STG_EPD_VMODE);
+          tryupdate(V_AntiGhost, STG_EPD_AGHOST);
+          tryupdate(V_Team, STG_EPD_TEAM);
           if (cfg_is_updated && atoi(V_Version.value()))
               nmea_cfg_restart(true);
           else
-              NMEA_encode("$PSKVC,0,,,,,,,,,,,,,,,,,,*41\r\n", 31);
+              NMEA_encode("$PSKVC,0,,,,,,,,,*41\r\n", 22);
+#endif
       }
   }
 #endif /* USE_SKYVIEW_CFG */

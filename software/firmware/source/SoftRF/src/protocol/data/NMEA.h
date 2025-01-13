@@ -45,7 +45,7 @@
 //#define PSRFS_VERSION       1
 //#define MAX_PSRFS_LEN       96
 
-#define PSKVC_VERSION       1
+#define PSKVC_VERSION       2
 //#define MAX_PSKVC_LEN       96
 
 void NMEA_setup(void);
