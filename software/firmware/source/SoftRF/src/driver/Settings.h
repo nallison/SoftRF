@@ -48,18 +48,8 @@
 #define SOFTRF_EEPROM_VERSION 0xACAC0B0D
 #define SOFTRF_SETTINGS_VERSION 1
 
-#if defined(ESP32)
-#define ABANDON_EEPROM
-#endif
-
-#if defined(ARDUINO_ARCH_NRF52)
-#define ABANDON_EEPROM
-#endif
-
-#if defined(ABANDON_EEPROM)
 // the "ui" settings have been appended into "settings"
 #define ui settings
-#endif
 
 enum
 {
@@ -156,19 +146,12 @@ enum
 	FLIGHT_LOG_TRAFFIC
 };
 
-enum
-{
-	LOG_INTERVAL_1S = 0,
-	LOG_INTERVAL_2S = 1,
-	LOG_INTERVAL_4S = 2,
-	LOG_INTERVAL_8S = 3
-};
-
 enum stgidx {
     STG_NONE,
     STG_VERSION,
     STG_MODE,
     STG_PROTOCOL,
+    STG_ALTPROTOCOL,
     STG_BAND,
     STG_ACFT_TYPE,
     STG_ID_METHOD,
@@ -178,7 +161,8 @@ enum stgidx {
     STG_ALARM,
     STG_HRANGE,
     STG_VRANGE,
-    STG_TXPOWER,
+    STG_OLD_TXPWR,    // obsolete
+    STG_TXPOWER,      // new coding
     STG_VOLUME,
     STG_POINTER,
 //#if defined(ESP32)
@@ -195,19 +179,19 @@ enum stgidx {
     STG_BAUD_RATE,
     STG_NMEA_OUT,
     STG_NMEA_G,
-    STG_NMEA_P,
-    STG_NMEA_L,
     STG_NMEA_S,
-    STG_NMEA_D,
+    STG_NMEA_T,
     STG_NMEA_E,
+    STG_NMEA_D,
+    STG_NMEA_P,
 //#if defined(ESP32)
     STG_NMEA_OUT2,
     STG_NMEA2_G,
-    STG_NMEA2_P,
-    STG_NMEA2_L,
     STG_NMEA2_S,
-    STG_NMEA2_D,
+    STG_NMEA2_T,
     STG_NMEA2_E,
+    STG_NMEA2_D,
+    STG_NMEA2_P,
     STG_ALTPIN0,
     STG_BAUDRATE2,
     STG_INVERT2,
@@ -222,6 +206,7 @@ enum stgidx {
     STG_GDL90,
     STG_D1090,
     STG_RELAY,
+    STG_PFLAA_CS,
     STG_STEALTH,
     STG_NO_TRACK,
     STG_POWER_SAVE,
@@ -235,12 +220,14 @@ enum stgidx {
 //#endif
     STG_LOGFLIGHT,
     STG_LOGINTERVAL,
+    STG_COMPFLASH,
     STG_IGC_PILOT,
     STG_IGC_TYPE,
     STG_IGC_REG,
     STG_IGC_CS,
     STG_GEOID,
-    STG_JSON,
+    STG_LEAPSECS,
+  //STG_JSON,
 //#if defined(USE_EPAPER)
     STG_EPD_UNITS,
     STG_EPD_ZOOM,
@@ -257,12 +244,14 @@ enum stgidx {
 };
 
 enum stgtyp {
-    STG_HEX6  = -4,
-    STG_HEX2  = -3,
-    STG_UINT1 = -2,
-    STG_INT1  = -1,
+    STG_OBSOLETE = -6,   // input-only (to be converted) (data type STG_INT1)
+    STG_HIDDEN = -5,     // not visible in web page (data type STG_INT1)
+    STG_HEX6  = -4,      // 6 hex digits
+    STG_HEX2  = -3,      // 00..FF
+    STG_UINT1 = -2,      // 0..255
+    STG_INT1  = -1,      // -128..+127
     STG_VOID  = 0,
-    STG_STR    // strings' "type" equals their length
+    STG_STR   = 1        // strings' "type" value equals their length
 };
 
 struct setting_struct {
@@ -285,7 +274,7 @@ typedef struct __attribute__((packed)) PackedSettings {
 
     bool     nmea_g:1;       // do not move
     bool     nmea_p:1;
-    bool     nmea_l:1;
+    bool     nmea_t:1;
     bool     nmea_s:1;
     bool     nmea_d:1;
     uint8_t  nmea_out:3;     // do not move
@@ -304,7 +293,7 @@ typedef struct __attribute__((packed)) PackedSettings {
     uint8_t  power_save:2;
     uint8_t  power_ext:1;    /* if nonzero, shuts down if battery is not full */
     uint8_t  rx1090:2;       // attached ADS-B receiver module    // do not move
-    bool     mode_s:1;
+    uint8_t  mode_s:1;
 
     uint8_t  gnss_pins:2;    // external GNSS added to T-Beam     // do not move
     uint8_t  sd_card:2;      // gpio pins for SD card adapter
@@ -340,7 +329,7 @@ typedef struct __attribute__((packed)) PackedSettings {
 
     bool     nmea2_g:1;       // do not move
     bool     nmea2_p:1;
-    bool     nmea2_l:1;
+    bool     nmea2_t:1;
     bool     nmea2_s:1;
     bool     nmea2_d:1;
     uint8_t  nmea_out2:3;     // second NMEA output route    // do not move
@@ -353,15 +342,17 @@ typedef struct __attribute__((packed)) PackedSettings {
 
 typedef struct Settings {
 
-    uint8_t  version;
+    int8_t   version;
     uint8_t  mode;
     uint8_t  rf_protocol;
+    uint8_t  altprotocol;
     uint8_t  band;
     uint8_t  acft_type;
     uint8_t  alarm;
     uint8_t  hrange;
     uint8_t  vrange;
-    uint8_t  txpower;
+    int8_t   old_txpwr;  // int not uint to allow making it "obsolete".
+    int8_t   txpower;    // int not uint to allow making it "hidden".
     uint8_t  id_method;
     uint32_t aircraft_id;
     uint32_t ignore_id;
@@ -371,30 +362,32 @@ typedef struct Settings {
     uint8_t  bluetooth;     // no effect on T-Echo?  (always BLE, always active?)
     uint8_t  baud_rate;
     uint8_t  nmea_out;
-    bool     nmea_g;
-    bool     nmea_p;
-    bool     nmea_l;
-    bool     nmea_s;
-    bool     nmea_d;
-    bool     nmea_e;
+    uint8_t  nmea_g;        // now these are bitfields
+    uint8_t  nmea_p;
+    uint8_t  nmea_t;
+    uint8_t  nmea_s;
+    uint8_t  nmea_d;
+    uint8_t  nmea_e;
     uint8_t  baudrate2;
     uint8_t  nmea_out2;
-    bool     nmea2_g;
-    bool     nmea2_p;
-    bool     nmea2_l;
-    bool     nmea2_s;
-    bool     nmea2_d;
-    bool     nmea2_e;     // whether to send bridged data
+    uint8_t  nmea2_g;       // now these are bitfields
+    uint8_t  nmea2_p;
+    uint8_t  nmea2_t;
+    uint8_t  nmea2_s;
+    uint8_t  nmea2_d;
+    uint8_t  nmea2_e;       // whether to send bridged data
     bool     stealth;
     bool     no_track;
-    uint8_t  gdl90;      // output destination
+    uint8_t  gdl90;         // output destination
     uint8_t  d1090;
-    uint8_t  json;
+    //uint8_t  json;
     int8_t   geoid;
-    int8_t   freq_corr; /* +/-, kHz */   // <<< limited to +-30, so can liberate two bits
+    int8_t   leapsecs;
+    int8_t   freq_corr; /* +/-, kHz */   // <<< limited to +-30
     uint8_t  relay;
-    bool    logalarms;
-    uint8_t  debug_flags;   /* each bit activates output of some debug info */
+    bool     pflaa_cs;
+    bool     logalarms;
+    uint32_t debug_flags;   /* each bit activates output of some debug info */
 
 //#if defined(ESP32)
     uint8_t  strobe;
@@ -410,7 +403,7 @@ typedef struct Settings {
     uint8_t  power_ext;  /* if nonzero, shuts down if battery is not full */
     uint8_t  rx1090;
     uint8_t  rx1090x;    // settings for the ADS-B receiver module
-    bool     mode_s;
+    uint8_t  mode_s;
     uint8_t  hrange1090;  // km
     uint8_t  vrange1090;  // hundreds of meters
     uint8_t  gdl90_in;    // data from this port will be interpreted as GDL90
@@ -422,6 +415,7 @@ typedef struct Settings {
 //#endif
     uint8_t  logflight;
     uint8_t  loginterval;
+    uint8_t  compflash;
     char     igc_pilot[32];
     char     igc_type[20];
     char     igc_reg[12];
@@ -457,12 +451,63 @@ typedef union EEPROM_U {
    uint8_t raw[sizeof(eeprom_struct_t)];
 } eeprom_t;
 
+// bitfields
+
+#define NMEA_BASIC 1
+
+#define NMEA_G 0x000
+#define NMEA_G_BASIC (NMEA_G + 1)
+#define NMEA_G_GSA   (NMEA_G + 2)
+#define NMEA_G_GST   (NMEA_G + 4)
+#define NMEA_G_GSV   (NMEA_G + 8)
+//#define NMEA_G_10  (NMEA_G + 0x10)
+//#define NMEA_G_20  (NMEA_G + 0x20)
+//#define NMEA_G_40  (NMEA_G + 0x40)
+#define NMEA_G_OTHER (NMEA_G + 0x80)
+#define NMEA_G_NONBASIC (NMEA_G + 0xFE)
+#define NMEA_G_ALL   (NMEA_G + 0xFF)
+
+#define NMEA_T 0x100
+#define NMEA_T_BASIC (NMEA_T + 1)
+#define NMEA_T_PROJ  (NMEA_T + 8)
+
+#define NMEA_S 0x200
+#define NMEA_S_BASIC (NMEA_S + 1)
+#define NMEA_S_LK8   (NMEA_S + 2)
+#define NMEA_S_AHRS  (NMEA_S + 4)
+#define NMEA_S_ALL   (NMEA_S + 0xFF)
+
+#define NMEA_E 0x300
+#define NMEA_E_TUNNEL (NMEA_E + 1)
+#define NMEA_E_OUTPUT (NMEA_E + 2)
+#define NMEA_E_ALL    (NMEA_E + 0xFF)
+
+#define NMEA_D 0x400
+#define NMEA_D_BASIC   (NMEA_D + 1)
+#define NMEA_D_ALL     (NMEA_D + 0xFF)
+// maybe:
+//#define NMEA_D_RADIO   (NMEA_D + 2)
+//#define NMEA_D_TRAFFIC (NMEA_D + 4)
+//#define NMEA_D_PROJ    (NMEA_D + 8)
+//#define NMEA_D_UI      (NMEA_D + 0x10)
+//#define NMEA_D_ADSB    (NMEA_D + 0x20)
+//#define NMEA_D_40      (NMEA_D + 0x40)
+//#define NMEA_D_OTHER   (NMEA_D + 0x80)
+
+#define NMEA_P 0x500
+#define NMEA_P_BASIC (NMEA_P + 1)
+
+// also available:
+//#define NMEA_6 0x600
+//#define NMEA_7 0x700
+
 #define DEBUG_WIND 0x01
 #define DEBUG_PROJECTION 0x02
 #define DEBUG_ALARM 0x04
 #define DEBUG_LEGACY 0x08
 #define DEBUG_DEEPER 0x10
-#define DEBUG_SIMULATE 0x20
+// now debug_flags is 24 bits so can have many other specific values
+#define DEBUG_SIMULATE 0x800000
 
 void Adjust_Settings(void);
 void Settings_setup(void);
@@ -470,10 +515,11 @@ void Settings_defaults(bool keepsome);
 void EEPROM_store(void);
 int  find_setting(const char *label);
 bool load_setting(const int index, const char *value);
-bool format_setting(const int index, const bool comment);
+bool format_setting(const int index, const bool comment, char *buf=NULL, size_t size=0);
 void show_settings_serial(void);
 void save_settings_to_file(void);
 bool load_settings_from_file(void);
+const char *settings_message(const char *msg=NULL, const char *submsg=NULL, const int val=0);
 void do_test_mode(void);
 
 enum stg_default {
@@ -485,6 +531,7 @@ extern uint8_t settings_used;
 
 extern settings_t *settings;
 extern setting_struct stgdesc[STG_END];
+extern const char * stgcomment[STG_END];
 extern uint32_t baudrates[];
 extern bool do_alarm_demo;
 extern bool test_mode;
