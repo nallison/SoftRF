@@ -186,6 +186,7 @@ void Time_loop()
 {
     uint32_t now_ms = millis();
     static uint32_t last_loop = 0;
+    static uint32_t last_utc = 0;
 
 #if 0
     // gather some data on how often the main loop() goes around
@@ -301,6 +302,10 @@ no_pps_time = latest_Commit_Time - no_pps_corr;
         }
     }
 
+    bool freerun = false;
+    if (now_ms - last_utc < 11111)
+        newfix = false;   // keep on free-running
+
     /* between fixes (but not before first fix): free-running clock */
     if (! newfix) {
         if (ref_time_ms > 0 && now_ms >= ref_time_ms + 1000) {
@@ -352,6 +357,15 @@ no_pps_time = latest_Commit_Time - no_pps_corr;
     if (gnss_age + time_corr_neg >= 1000)
         OurTime += 1;
     /* updated ref_time_ms is the other side effect */
+
+    // apply a correction to leap seconds if available
+    // (set up in GNSS_loop based on Ublox leap-seconds and settings->leapsecs)
+    if (leap_seconds_correction > 0)
+        OurTime -= (uint32_t) leap_seconds_correction;
+    else if (leap_seconds_correction < 0)
+        OurTime += (uint32_t) (-leap_seconds_correction);
+
+    last_utc = now_ms;
 
     /* system clock also gets updated, once a minute,
            by GNSSTimeSync() called from GNSS_loop() */

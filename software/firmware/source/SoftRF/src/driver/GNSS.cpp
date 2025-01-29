@@ -412,11 +412,15 @@ static boolean getUBX_ACK(uint8_t cl, uint8_t id) {
     if (ackByteID > 9) {
       // All packets in order!
       GNSS_DEBUG_PRINTLN(F(" (SUCCESS!)"));
+if (settings->debug_flags) {
+Serial.print(F("getUBX_ACK() got response after ms: "));
+Serial.println(millis() - startTime);
+}
       return true;
     }
 
     // Timeout if no valid response in 2 seconds
-    if (millis() - startTime > 2000) {
+    if (millis() - startTime > 4000) {       // 2000 is too short!
       GNSS_DEBUG_PRINTLN(F(" (FAILED!)"));
       return false;
     }
@@ -471,41 +475,38 @@ static void setup_UBX()
   SoC->swSer_begin(baudrate);
 #endif
 
-  if (settings->mode == SOFTRF_MODE_MORENMEA) {
+  if (gnss_id == GNSS_MODULE_U8) {
 
-    if (gnss_id == GNSS_MODULE_U8) {
+    GNSS_DEBUG_PRINTLN(F("Setting GNSS configuration"));
 
-      GNSS_DEBUG_PRINTLN(F("Setting GNSS configuration"));
-
-      msglen = makeUBXCFG(0x06, 0x3E, sizeof(setGNSS_U8), setGNSS_U8);
-      sendUBX(GNSSbuf, msglen);
-      gnss_set_sucess = getUBX_ACK(0x06, 0x3E);
-      if (!gnss_set_sucess) {
-        //GNSS_DEBUG_PRINTLN(F("WARNING: Unable to set GNSS configuration"));
-        Serial.println(F("WARNING: Unable to set GNSS configuration"));
-      }
-
-      GNSS_DEBUG_PRINTLN(F("Setting NMEA version 4.0 extended"));
-
-      msglen = makeUBXCFG(0x06, 0x17, sizeof(setNMEA_U8), setNMEA_U8);
-      sendUBX(GNSSbuf, msglen);
-      gnss_set_sucess = getUBX_ACK(0x06, 0x17);
-      if (!gnss_set_sucess) {
-        //GNSS_DEBUG_PRINTLN(F("WARNING: Unable to set NMEA version 4.0 extended"));
-        Serial.println(F("WARNING: Unable to set NMEA version 4.0 extended"));
-      }
-
-    }
-
-    GNSS_DEBUG_PRINTLN(F("Setting SBAS"));
-
-    msglen = makeUBXCFG(0x06, 0x16, sizeof(setSBAS), setSBAS);
+    msglen = makeUBXCFG(0x06, 0x3E, sizeof(setGNSS_U8), setGNSS_U8);
     sendUBX(GNSSbuf, msglen);
-    gnss_set_sucess = getUBX_ACK(0x06, 0x16);
+    gnss_set_sucess = getUBX_ACK(0x06, 0x3E);
     if (!gnss_set_sucess) {
-      //GNSS_DEBUG_PRINTLN(F("WARNING: Unable to set SBAS"));
-      Serial.println(F("WARNING: Unable to set SBAS"));
+      //GNSS_DEBUG_PRINTLN(F("WARNING: Unable to set GNSS configuration"));
+      Serial.println(F("WARNING: Unable to set GNSS configuration"));
     }
+
+    GNSS_DEBUG_PRINTLN(F("Setting NMEA version 4.0 extended"));
+
+    msglen = makeUBXCFG(0x06, 0x17, sizeof(setNMEA_U8), setNMEA_U8);
+    sendUBX(GNSSbuf, msglen);
+    gnss_set_sucess = getUBX_ACK(0x06, 0x17);
+    if (!gnss_set_sucess) {
+      //GNSS_DEBUG_PRINTLN(F("WARNING: Unable to set NMEA version 4.0 extended"));
+      Serial.println(F("WARNING: Unable to set NMEA version 4.0 extended"));
+    }
+
+  }
+
+  GNSS_DEBUG_PRINTLN(F("Setting SBAS"));
+
+  msglen = makeUBXCFG(0x06, 0x16, sizeof(setSBAS), setSBAS);
+  sendUBX(GNSSbuf, msglen);
+  gnss_set_sucess = getUBX_ACK(0x06, 0x16);
+  if (!gnss_set_sucess) {
+    //GNSS_DEBUG_PRINTLN(F("WARNING: Unable to set SBAS"));
+    Serial.println(F("WARNING: Unable to set SBAS"));
   }
 
   GNSS_DEBUG_PRINTLN(F("Airborne <2g navigation mode: "));
@@ -514,7 +515,6 @@ static void setup_UBX()
   msglen = makeUBXCFG(0x06, 0x24, sizeof(setNav5), setNav5);
   sendUBX(GNSSbuf, msglen);
   gnss_set_sucess = getUBX_ACK(0x06, 0x24);
-
   if (!gnss_set_sucess) {
     //GNSS_DEBUG_PRINTLN(F("WARNING: Unable to set airborne <2g navigation mode."));
     Serial.println(F("WARNING: Unable to set airborne <2g navigation mode."));
@@ -525,7 +525,6 @@ static void setup_UBX()
   msglen = makeUBXCFG(0x06, 0x01, sizeof(enaGGA), enaGGA);
   sendUBX(GNSSbuf, msglen);
   gnss_set_sucess = getUBX_ACK(0x06, 0x01);
-
   if (!gnss_set_sucess) {
     //GNSS_DEBUG_PRINTLN(F("WARNING: Unable to enable NMEA GGA."));
     Serial.println(F("WARNING: Unable to enable NMEA GGA."));
@@ -536,7 +535,6 @@ static void setup_UBX()
   msglen = makeUBXCFG(0x06, 0x01, sizeof(enaRMC), enaRMC);
   sendUBX(GNSSbuf, msglen);
   gnss_set_sucess = getUBX_ACK(0x06, 0x01);
-
   if (!gnss_set_sucess) {
     //GNSS_DEBUG_PRINTLN(F("WARNING: Unable to enable NMEA RMC."));
     Serial.println(F("WARNING: Unable to enable NMEA RMC."));
@@ -547,43 +545,54 @@ static void setup_UBX()
   msglen = makeUBXCFG(0x06, 0x01, sizeof(disGLL), disGLL);
   sendUBX(GNSSbuf, msglen);
   gnss_set_sucess = getUBX_ACK(0x06, 0x01);
-
   if (!gnss_set_sucess) {
     //GNSS_DEBUG_PRINTLN(F("WARNING: Unable to disable NMEA GLL."));
     Serial.println(F("WARNING: Unable to disable NMEA GLL."));
   }
 
-  GNSS_DEBUG_PRINTLN(F("Setting NMEA GSA: "));
-
-  msglen = makeUBXCFG(0x06, 0x01, sizeof(enaGSA), (settings->mode == SOFTRF_MODE_MORENMEA) ? enaGSA: disGSA);
-  sendUBX(GNSSbuf, msglen);
-  gnss_set_sucess = getUBX_ACK(0x06, 0x01);
-
-  if (!gnss_set_sucess) {
-    //GNSS_DEBUG_PRINTLN(F("WARNING: Unable to set NMEA GSA."));
-    Serial.println(F("WARNING: Unable to set NMEA GSA."));
+  bool enable = ((settings->nmea_g | settings->nmea2_g) & NMEA_G_GSA);
+  if (enable) {
+    GNSS_DEBUG_PRINTLN(F("Setting NMEA GSA: "));
+    msglen = makeUBXCFG(0x06, 0x01, sizeof(enaGSA), (enable ? enaGSA : disGSA));
+    sendUBX(GNSSbuf, msglen);
+    gnss_set_sucess = getUBX_ACK(0x06, 0x01);
+    if (!gnss_set_sucess) {
+      //GNSS_DEBUG_PRINTLN(F("WARNING: Unable to set NMEA GSA."));
+      Serial.println(F("WARNING: Unable to set NMEA GSA."));
+    } else {
+      Serial.print(F("Set GNSS NMEA GSA to "));
+      Serial.println(enable);
+    }
   }
 
-  GNSS_DEBUG_PRINTLN(F("Setting NMEA GST: "));
-
-  msglen = makeUBXCFG(0x06, 0x01, sizeof(enaGST), (settings->mode == SOFTRF_MODE_MORENMEA) ? enaGST: disGST);
-  sendUBX(GNSSbuf, msglen);
-  gnss_set_sucess = getUBX_ACK(0x06, 0x01);
-
-  if (!gnss_set_sucess) {
-    //GNSS_DEBUG_PRINTLN(F("WARNING: Unable to set NMEA GST."));
-    Serial.println(F("WARNING: Unable to set NMEA GST."));
+  enable = ((settings->nmea_g | settings->nmea2_g) & NMEA_G_GST);
+  if (enable) {
+    GNSS_DEBUG_PRINTLN(F("Setting NMEA GST: "));
+    msglen = makeUBXCFG(0x06, 0x01, sizeof(enaGST), (enable ? enaGST : disGST));
+    sendUBX(GNSSbuf, msglen);
+    gnss_set_sucess = getUBX_ACK(0x06, 0x01);
+    if (!gnss_set_sucess) {
+      //GNSS_DEBUG_PRINTLN(F("WARNING: Unable to set NMEA GST."));
+      Serial.println(F("WARNING: Unable to set NMEA GST."));
+    } else {
+      Serial.print(F("Set GNSS NMEA GST to "));
+      Serial.println(enable);
+    }
   }
 
-  GNSS_DEBUG_PRINTLN(F("Setting NMEA GSV: "));
-
-  msglen = makeUBXCFG(0x06, 0x01, sizeof(enaGSV), (settings->mode == SOFTRF_MODE_MORENMEA) ? enaGSV: disGSV);
-  sendUBX(GNSSbuf, msglen);
-  gnss_set_sucess = getUBX_ACK(0x06, 0x01);
-
-  if (!gnss_set_sucess) {
-    //GNSS_DEBUG_PRINTLN(F("WARNING: Unable to set NMEA GSV."));
-    Serial.println(F("WARNING: Unable to set NMEA GSV."));
+  enable = ((settings->nmea_g | settings->nmea2_g) & NMEA_G_GSV);
+  if (enable) {
+    GNSS_DEBUG_PRINTLN(F("Setting NMEA GSV: "));
+    msglen = makeUBXCFG(0x06, 0x01, sizeof(enaGSV), (enable ? enaGSV : disGSV));
+    sendUBX(GNSSbuf, msglen);
+    gnss_set_sucess = getUBX_ACK(0x06, 0x01);
+    if (!gnss_set_sucess) {
+      //GNSS_DEBUG_PRINTLN(F("WARNING: Unable to set NMEA GSV."));
+      Serial.println(F("WARNING: Unable to set NMEA GSV."));
+    } else {
+      Serial.print(F("Set GNSS NMEA GSV to "));
+      Serial.println(enable);
+    }
   }
 
   GNSS_DEBUG_PRINTLN(F("Switching off NMEA VTG: "));
@@ -715,7 +724,6 @@ Serial.println("ublox_query()...");
 
   while (waittime < (uint32_t) timelimit ) {
 
-    if ((waittime & 0x3F) == 0)  yield();
     if ((waittime > 1000 && count==1) || (waittime > 2000 && count==2)) {
 Serial.println("... re-sending UBX command");
       uint8_t msglen = makeUBXCFG(requestedClass, requestedID, 0, NULL); // MON-VER
@@ -744,6 +752,7 @@ Serial.println("... re-sending UBX command");
     }
 
     waittime = (millis() - startTime);
+    yield();
   }
 
   GNSS_cnt = 0;
@@ -815,7 +824,7 @@ static bool ublox_setup()
   Serial_GNSS_Out.write("$PUBX,40,GLL,0,0,0,0*5C\r\n"); delay(250);
   Serial_GNSS_Out.write("$PUBX,40,GSV,0,0,0,0*59\r\n"); delay(250);
   Serial_GNSS_Out.write("$PUBX,40,VTG,0,0,0,0*5E\r\n"); delay(250);
-  if (settings->mode == SOFTRF_MODE_MORENMEA)
+  if (! ((settings->nmea_g | settings->nmea2_g) & NMEA_G_GSA))
     Serial_GNSS_Out.write("$PUBX,40,GSA,0,0,0,0*4E\r\n"); delay(250);
 #endif
 
@@ -1101,7 +1110,7 @@ static bool sony_setup()
 
   /* GGA + GSA + RMC */
   Serial_GNSS_Out.write("@BSSL 0x25\r\n"); delay(250);
-  // >>> should find out how to disable GSA unless (settings->mode == SOFTRF_MODE_MORENMEA)
+  // >>> should find out how to enable/disable GSA
   /* GPS + GLONASS. This command must be issued at Idle state */
   Serial_GNSS_Out.write("@GNS 3\r\n");     delay(250);
   /*  Positioning algorithm. This command must be issued at Idle state */
@@ -1219,7 +1228,7 @@ static bool mtk_setup()
 
   /* RMC + GGA + GSA */
   Serial_GNSS_Out.write("$PMTK314,0,1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0*29\r\n");
-  // >>> should find out how to disable GSA unless (settings->mode == SOFTRF_MODE_MORENMEA)
+  // >>> should find out how to enable/disable GSA
   GNSS_FLUSH(); delay(250);
 
   /* Aviation mode */
@@ -1282,7 +1291,7 @@ static bool goke_setup()
   goke_sendcmd("$PGKC239,1*3A\r\n");
 #endif
 
-  if (settings->mode == SOFTRF_MODE_MORENMEA)  /* RMC + GGA + GSA */
+  if ((settings->nmea_g | settings->nmea2_g) & NMEA_G_GSA)  /* RMC + GGA + GSA */
     goke_sendcmd("$PGKC242,0,1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0*36\r\n");
   else   /* RMC + GGA */
     goke_sendcmd("$PGKC242,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*37\r\n");
@@ -1374,7 +1383,7 @@ static bool at65_setup()
     //Serial_GNSS_Out.write("$PCAS04,7*1E\r\n"); /* GPS + GLONASS + BEIDOU */
   delay(250);
   Serial_GNSS_Out.write("$PCAS02,1000*2E\r\n");  /* set positioning frequency to 1Hz */
-  if (settings->mode == SOFTRF_MODE_MORENMEA) {
+  if ((settings->nmea_g | settings->nmea2_g) & NMEA_G_GSA) {
     /* GGA,RMC and GSA */
     Serial_GNSS_Out.write("$PCAS03,1,0,1,0,1,0,0,0,0,0,,,0,0*03\r\n");
     delay(250);
@@ -1411,12 +1420,18 @@ const gnss_chip_ops_t at65_ops = {
 static bool GNSS_fix_cache = false;
 static bool badGGA = true;
 
+int8_t leap_seconds_correction = 0;
+
+static uint8_t leap_valid = 2;  // means not known whether valid
+
 bool leap_seconds_valid()
 {
-    static uint8_t leap_valid = 2;  // means not known whether valid
     // could start = 0 but risk 13 minutes of no-transmit if no response
     // - usually gets set to 0 in first check below (if no leap seconds)
     //    - before even the first fix, so no bad transmissions happen
+
+    if (leap_valid == 1)
+        return true;
 
     // this is only called if GNSS_fix_cache == true
     switch (hw_info.gnss) {
@@ -1429,14 +1444,27 @@ bool leap_seconds_valid()
             static uint32_t next_check = 0;
             static uint8_t checks_count = 0;
             static uint8_t max_checks = 18;   // 13 minutes
-            if (leap_valid!=1 && checks_count<max_checks && (checks_count==0 || millis()>next_check)) {
+            if (checks_count<max_checks && (checks_count==0 || millis()>next_check)) {
                 if (ublox_query(0x01, 0x20, 2000) == true) {    // NAV-TIMEGPS
+                    int8_t leap_seconds_from_gnss = GNSSbuf[10];
+                    Serial.print("UBX leap seconds = ");
+                    Serial.println(leap_seconds_from_gnss);
                     if ((GNSSbuf[11] & 0x04) == 0) {
                         leap_valid = 0;    // known invalid
-                        Serial.println("UBX says leap seconds not known yet");
+                        Serial.println(F("UBX says leap seconds unknown, is using default"));
+                        // U6 defaults to 15, 2025 correct value is 18:
+                        leap_seconds_correction = settings->leapsecs - leap_seconds_from_gnss;
+                        Serial.print(F("SoftRF using leap_seconds_correction = "));
+                        Serial.println(leap_seconds_correction);
                     } else {
                         leap_valid = 1;    // known valid, no need to ask again
-                        Serial.println("UBX says leap seconds known");
+                        Serial.println("UBX says leap seconds known valid");
+                        leap_seconds_correction = 0;    // no correction needed
+                        if (settings->leapsecs != leap_seconds_from_gnss) {
+                            settings->leapsecs = leap_seconds_from_gnss;
+                            save_settings_to_file();
+                            // this will only happen once in a few years!
+                        }
                     }
                 } else {
                     // (query failed) - no change in leap_valid
@@ -1445,7 +1473,7 @@ bool leap_seconds_valid()
                 next_check = millis() + 43000;
                 ++checks_count;
                 if (checks_count >= 18) {
-                    leap_valid = 2;     // in case it never works - resume transmissions
+                    leap_valid = 2;     // in case it never works
                     max_checks = 36;    // keep trying for up to 13 more minutes
                 }
             }
@@ -1461,10 +1489,7 @@ bool leap_seconds_valid()
 
 bool isValidGNSSFix()
 {
-  if (! GNSS_fix_cache)
-      return false;
-  return true;
-  //return leap_seconds_valid();
+  return GNSS_fix_cache;
 }
 
 // variables for $PFSIM
@@ -1541,7 +1566,7 @@ byte GNSS_setup() {
       }
   }
 
-  if (gnss_id == GNSS_MODULE_NONE) {               // no NMEA sentences seen in 3 trials
+  if (gnss_id == GNSS_MODULE_NONE) {               // no NMEA sentences seen in 2 trials (6 sec)
 
 #if !defined(EXCLUDE_GNSS_UBLOX) && defined(ENABLE_UBLOX_RFS)
     if (hw_info.model == SOFTRF_MODEL_PRIME_MK2 ||
@@ -1555,11 +1580,11 @@ byte GNSS_setup() {
 
         gnss_chip = &ublox_ops;
 
-        Serial.println(F("WARNING: Misconfigured UBLOX GNSS detected!"));
+        Serial.println(F("WARNING: UBLOX GNSS detected but no NMEA!"));
         gnss_id = generic_nmea_ops.probe();    // try one more time, following UBX response
         if (gnss_id == GNSS_MODULE_NMEA) {
 
-            gnss_id = (gnss_id_t) version;     // third time's the charm
+            gnss_id = (gnss_id_t) version;     // got NMEA on the third time
             Serial.println(F("... OK after ublox_version()"));   // and fall through to probe() call below
 
         } else {
@@ -1651,9 +1676,8 @@ void GNSS_loop()
   if (gnss_needs_reset) {
       gnss_needs_reset = false;
       reset_gnss();
-      delay(2000);
       Serial.println("Rebooting...");
-      delay(2000);
+      delay(1000);
       reboot();
   }
 #endif
@@ -1672,9 +1696,15 @@ void GNSS_loop()
                   (gnss.altitude.age() <= NMEA_EXP_TIME) &&
                   (gnss.date.age()     <= NMEA_EXP_TIME);
 
-  GNSSTimeSync();
-
   if (gnss_chip) gnss_chip->loop();
+
+  if (! GNSS_fix_cache)
+      return;
+  
+  if (leap_valid != 1)
+      (void) leap_seconds_valid();  // periodically check again
+
+  GNSSTimeSync();
 }
 
 void GNSS_fini()
@@ -1878,12 +1908,12 @@ uint8_t Try_GNSS_sentence() {
     }
 
     bool is_gga = (is_g && gb[3]=='G' && gb[4]=='G' && gb[5]=='A');
+    bool is_rmc = false;
+    if (! is_gga)
+      is_rmc = (is_g && gb[3]=='R' && gb[4]=='M' && gb[5]=='C');
     uint32_t now_ms = millis();
     if (now_ms > prev_fix_ms + 600) {           // expect one fix per second
       gnss_new_fix = gnss_new_time = false;     // withdraw what was not consumed
-      bool is_rmc = false;
-      if (! is_gga)
-          is_rmc = (is_g && gb[3]=='R' && gb[4]=='M' && gb[5]=='C');
       if ((is_gga && new_gga_ms != 0) || (is_rmc && new_rmc_ms != 0)
                  || (latest_Commit_Time != 0 && now_ms > latest_Commit_Time + 600)) {
           // other sentence failed to arrive within same second - start over
@@ -1954,22 +1984,37 @@ uint8_t Try_GNSS_sentence() {
     }
     // get here even if within same second, to output GSV to NMEA destinations
 
+    if (settings->nmea_g == 0 && settings->nmea2_g == 0)
+        return 1;
+
+    uint16_t nmeatype;
+    if (is_gga || is_rmc) {
+        nmeatype = NMEA_G;
+    } else {
+        if (((settings->nmea_g | settings->nmea2_g) & NMEA_G_NONBASIC) == 0)
+            return 1;
+        nmeatype = NMEA_G_OTHER;
+        if (is_g && gb[3]=='G' && gb[4]=='S') {
+            if (gb[5]=='A')  nmeatype = NMEA_G_GSA;
+            if (gb[5]=='T')  nmeatype = NMEA_G_GST;
+            if (gb[5]=='V')  nmeatype = NMEA_G_GSV;
+        }
+    }
+
     /*
      * Work around issue with "always 0.0,M" GGA geoid separation value
      * given by some Chinese GNSS chipsets
      */
 #if defined(USE_NMEALIB)
     if (is_gga && gnss.separation.meters() == 0.0) {
-         if (settings->nmea_g || settings->nmea2_g)
-             NMEA_GGA();
+        NMEA_GGA();
             // GGA is output either indirectly (via NMEA_GGA()) or directly (below).
             // Observed on a T-Beam: NMEA_GGA() while no fix, then direct.
     }
     else
 #endif
     {
-        if (settings->nmea_g || settings->nmea2_g)
-            NMEA_Outs(settings->nmea_g, settings->nmea2_g, gb, write_size, true);
+        NMEA_Outs(nmeatype, gb, write_size, true);
     }
     return 1;
 }
