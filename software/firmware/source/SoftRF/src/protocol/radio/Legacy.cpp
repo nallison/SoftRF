@@ -279,7 +279,7 @@ bool latest_decode(void* buffer, container_t* this_aircraft, ufo_t* fop)
 
     latest_packet_t* pkt = (latest_packet_t *) buffer;
 
-#if 1
+#if 0
     if (settings->nmea_d || settings->nmea2_d) {
       if (settings->debug_flags & DEBUG_LEGACY) {
         if (settings->debug_flags & DEBUG_DEEPER) {
@@ -326,17 +326,15 @@ bool latest_decode(void* buffer, container_t* this_aircraft, ufo_t* fop)
     //fop->gnsstime_ms = millis();
 
     fop->airborne = (pkt->airborne > 1);
-    // no need to do this here since airborne only relayed in old protocol:
-    //if (fop->relayed && fop->airborne) {
-    //    fop->protocol = RF_PROTOCOL_ADSB_1090;
-    //    fop->tx_type  = TX_TYPE_TISB;
-    //} else
+    // no real need to do this here since airborne only relayed in old protocol:
+    //if (fop->relayed && fop->airborne)
+    //    fop->tx_type  = TX_TYPE_ADSB;    // assumption
     fop->protocol = RF_PROTOCOL_LATEST;
 
     fop->stealth   = pkt->stealth;
     fop->no_track  = pkt->no_track;
     fop->aircraft_type = pkt->aircraft_type;
-//Serial.printf("AC type: %d\n", fop->aircraft_type);
+//Serial.printf("rcvd AC type: %d\n", fop->aircraft_type);
 
     int alt = descale(pkt->alt,12,1,0) - 1000;
 //Serial.printf("altitude: %d\n", alt);
@@ -445,19 +443,28 @@ bool legacy_decode(void *buffer, container_t *this_aircraft, ufo_t *fop) {
     fop->addr = pkt->addr;
 
     if (fop->addr == settings->ignore_id)
-         return false;                 /* ID told in settings to ignore */
+        return false;                 /* ID told in settings to ignore */
 
-    if (fop->addr == ThisAircraft.addr && (! landed_out_mode)) {
-         Serial.println("warning: received same ID as this aircraft");
-         return false;
+    if (fop->addr == ThisAircraft.addr) {
+        if (landed_out_mode) {
+            // if "seeing itself" is via requested relay, show it
+            // Serial.println("Received own ID - relayed as landed out");
+        } else {
+            Serial.println("warning: received same ID as this aircraft");
+            return false;
+        }
     }
-    // but if "seeing itself" is via requested relay, show it
 
     for (int i=0; i < MAX_TRACKING_OBJECTS; i++) {
       if (Container[i].addr == fop->addr) {
         if (RF_last_crc != 0 && RF_last_crc == Container[i].last_crc) {
-          //Serial.println("duplicate packet");      // usually duplicated in 2nd time slot
-          return false;
+          //Serial.println("duplicate packet");  // usually duplicated in 2nd time slot
+          bool exempt = (Container[i].aircraft_type == AIRCRAFT_TYPE_UNKNOWN
+                          && settings->altprotocol != RF_PROTOCOL_NONE
+                          && (RF_time & 0x0F) == 0x0F);
+             // exempt last slot in 16 sec cycle for landed-out relay in alt-protocol
+          if (! exempt)
+              return false;
         }
         break;
       }
@@ -601,11 +608,9 @@ bool legacy_decode(void *buffer, container_t *this_aircraft, ufo_t *fop) {
     fop->airborne = pkt->airborne;
     if (fop->relayed && fop->airborne) {
         //fop->protocol = RF_PROTOCOL_ADSB_1090;   // assumption
-        fop->protocol = RF_PROTOCOL_LEGACY;
-        fop->tx_type  = TX_TYPE_TISB;            // not really, but implies delayed second-hand report
-    } else {
-        fop->protocol = RF_PROTOCOL_LEGACY;
+        fop->tx_type = TX_TYPE_ADSB;   // assumption
     }
+    fop->protocol = RF_PROTOCOL_LEGACY;
 
     /* FLARM sometimes sends packets with implausible data */
     if (fop->airborne == 0 && (vs10 > 150 || vs10 < -150))
@@ -710,18 +715,20 @@ Serial.printf("RF_time=%d but should be %d\r\n", (uint32_t) RF_time, timestamp);
     pkt->no_track = aircraft->no_track;
 
     uint8_t aircraft_type = aircraft->aircraft_type;
-    if (aircraft != &ThisAircraft
-           && aircraft_type == AIRCRAFT_TYPE_UNKNOWN)  // relaying landed-out traffic
+    if (aircraft == &ThisAircraft) {                    // not relaying some other aircraft
+      if (landed_out_mode)
+          aircraft_type = AIRCRAFT_TYPE_UNKNOWN;        // mark this aircraft as landed-out
+    } else {
+      if ((aircraft->protocol == RF_PROTOCOL_LATEST || aircraft->protocol == RF_PROTOCOL_LEGACY)
+           && aircraft->airborne==0
+           && aircraft_type == AIRCRAFT_TYPE_UNKNOWN) { // relaying landed-out traffic
         // && aircraft->landed_out)
-        aircraft_type == AIRCRAFT_TYPE_GLIDER;         // assumption
-        // (skip)
+        //aircraft_type = AIRCRAFT_TYPE_GLIDER;         // leave as "unknown" to signal landed-out
+      }
+    }
     if (aircraft_type == AIRCRAFT_TYPE_WINCH) {
         aircraft_type = AIRCRAFT_TYPE_STATIC;
         pkt->airborne = 2;
-  //} else if (millis() - SetupTimeMarker < 60000) {
-  //    pkt->airborne = 2;    /* post-boot testing */
-  //} else if (do_alarm_demo) {
-  //    pkt->airborne = 2;
     } else if (aircraft->airborne == 0) {
         pkt->airborne = 1;
     } else if (aircraft->circling != 0 && fabs(aircraft->turnrate) > 6.0) {
@@ -794,8 +801,9 @@ size_t legacy_encode(void *pkt_buffer, container_t *aircraft)
     pkt->addr = id & 0x00FFFFFF;
 
     bool relay = (aircraft != &ThisAircraft);  // aircraft is some other aircraft
-    bool relay_landed_out = relay &&
-            aircraft->airborne==0 && aircraft->aircraft_type==AIRCRAFT_TYPE_UNKNOWN;
+    bool relay_landed_out = (relay &&
+           (aircraft->protocol == RF_PROTOCOL_LATEST || aircraft->protocol == RF_PROTOCOL_LEGACY)
+           && aircraft->airborne==0 && aircraft->aircraft_type==AIRCRAFT_TYPE_UNKNOWN);
     //      aircraft->landed_out;
 
     if (relay)
@@ -805,11 +813,11 @@ size_t legacy_encode(void *pkt_buffer, container_t *aircraft)
 
 #if 1
     // relay in old protocol unless relaying landed-out traffic
-    if (settings->rf_protocol == RF_PROTOCOL_LATEST && (!relay || relay_landed_out))
+    if (current_RF_protocol == RF_PROTOCOL_LATEST && (!relay || relay_landed_out))
         return latest_encode(pkt_buffer, aircraft);
 #else
     // always relay in old protocol
-    if (settings->rf_protocol == RF_PROTOCOL_LATEST && !relay)
+    if (current_RF_protocol == RF_PROTOCOL_LATEST && !relay)
         return latest_encode(pkt_buffer, aircraft);
 #endif
 
@@ -894,9 +902,8 @@ size_t legacy_encode(void *pkt_buffer, container_t *aircraft)
     if (landed_out_mode)
         aircraft_type = AIRCRAFT_TYPE_UNKNOWN;    // marking ourself as landed-out
         // pkt->_unk1 = 1;
-    else if (relay_landed_out)
-        aircraft_type = AIRCRAFT_TYPE_GLIDER;     // assumption
-        // (skip)
+    //else if (relay_landed_out)
+        //aircraft_type = AIRCRAFT_TYPE_GLIDER;     // assumption
     else if (aircraft_type == AIRCRAFT_TYPE_WINCH) {
         aircraft_type = AIRCRAFT_TYPE_STATIC;
         pkt->airborne = 1;

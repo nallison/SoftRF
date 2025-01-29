@@ -273,7 +273,7 @@ static void RPi_setup()
 
   eeprom_block.field.settings.nmea_g        = true;
   eeprom_block.field.settings.nmea_p        = false;
-  eeprom_block.field.settings.nmea_l        = true;
+  eeprom_block.field.settings.nmea_t        = true;
   eeprom_block.field.settings.nmea_s        = true;
   eeprom_block.field.settings.nmea_out      = NMEA_UART;
   eeprom_block.field.settings.gdl90         = GDL90_OFF;

@@ -28,7 +28,11 @@ void Web_fini()     {}
 
 #include <Arduino.h>
 
-#if defined(ESP32)
+#if !defined(ESP32)
+void Web_setup()    {}
+void Web_loop()     {}
+void Web_fini()     {}
+#else
 
 #include "SPIFFS.h"
 #include "SD.h"
@@ -38,6 +42,7 @@ void Web_fini()     {}
 #include "../driver/RF.h"
 #include "Web.h"
 #include "../driver/Settings.h"
+#include "../driver/Filesys.h"
 #include "../driver/OLED.h"
 #include "../driver/GNSS.h"
 #include "../driver/Baro.h"
@@ -45,9 +50,6 @@ void Web_fini()     {}
 #include "../driver/Buzzer.h"
 #include "../driver/Voice.h"
 #include "../driver/Bluetooth.h"
-#if defined(USE_SD_CARD)
-#include "../driver/Filesys.h"
-#endif
 #include "../TrafficHelper.h"
 #include "../protocol/radio/Legacy.h"
 #include "../protocol/data/NMEA.h"
@@ -68,15 +70,31 @@ static uint32_t prev_rx_pkt_cnt = 0;
 
 // #include "jquery_min_js.h"     - skipped to save space
 
+static bool BTpaused = false;
+static bool reboot_pending = false;
+
+const char *page_message()
+{
+    if (settings->debug_flags & DEBUG_SIMULATE)
+        return "Warning: simulation mode (debug_flag)";
+    if (BTpaused)
+        return "Bluetooth paused, reboot to resume";
+    return settings_message();
+}
+
+static const char home[] PROGMEM =
+    "<br><br><input type=button onClick=\"location.href='/'\" value='Back to Home'><br><br>";
+
 byte getVal(char c)
 {
-   if(c >= '0' && c <= '9')
+   if (c >= '0' && c <= '9')
      return (byte)(c - '0');
    else
      return (byte)(toupper(c)-'A'+10);
 }
 
-#if DEBUG
+//#if DEBUG
+#if 0
 void Hex2Bin(String str, byte *buffer)
 {
   char hexdata[2 * PKT_SIZE + 1];
@@ -98,9 +116,6 @@ void Hex2Bin(String str, byte *buffer)
 //  Free memory: 68892
 // But in v112 it is over 150000 - why?
 
-static bool BTpaused = false;
-static bool reboot_pending = false;
-
 void stop_bluetooth(size_t needed_mem)
 {
   size_t freemem = ESP.getFreeHeap();
@@ -118,6 +133,16 @@ void stop_bluetooth(size_t needed_mem)
   yield();
   Serial.print(F("Free memory (BT off): "));
   Serial.println(ESP.getFreeHeap());
+}
+
+void close_logs()
+{
+#if defined(USE_SD_CARD)
+    closeFlightLog();
+    closeSDlog();
+#endif
+    if (AlarmLogOpen)
+        AlarmLog.close();
 }
 
 static const char about_html[] PROGMEM = "<html>\
@@ -141,42 +166,42 @@ com</h4>\
 <h2>Credits</h2>\
 <p>(in historical order)</p>\
 <table width=100%%>\
-<tr><th align=left>Ivan Grokhotkov</th><td align=left>Arduino core for ESP8266</td></tr>\
-<tr><th align=left>Zak Kemble</th><td align=left>nRF905 library</td></tr>\
-<tr><th align=left>Stanislaw Pusep</th><td align=left>flarm_decode</td></tr>\
-<tr><th align=left>Paul Stoffregen</th><td align=left>Arduino Time Library</td></tr>\
-<tr><th align=left>Mikal Hart</th><td align=left>TinyGPS++ and PString Libraries</td></tr>\
-<tr><th align=left>Phil Burgess</th><td align=left>Adafruit NeoPixel Library</td></tr>\
-<tr><th align=left>Andy Little</th><td align=left>Aircraft and MAVLink Libraries</td></tr>\
-<tr><th align=left>Peter Knight</th><td align=left>TrueRandom Library</td></tr>\
-<tr><th align=left>Matthijs Kooijman</th><td align=left>IBM LMIC and Semtech Basic MAC frameworks for Arduino</td></tr>\
-<tr><th align=left>David Paiva</th><td align=left>ESP8266FtpServer</td></tr>\
-<tr><th align=left>Lammert Bies</th><td align=left>Lib_crc</td></tr>\
-<tr><th align=left>Pawel Jalocha</th><td align=left>OGN library</td></tr>\
-<tr><th align=left>Timur Sinitsyn, Tobias Simon, Ferry Huberts</th><td align=left>NMEA library</td></tr>\
-<tr><th align=left>yangbinbin (yangbinbin_ytu@163.com)</th><td align=left>ADS-B encoder C++ library</td></tr>\
-<tr><th align=left>Hristo Gochkov</th><td align=left>Arduino core for ESP32</td></tr>\
-<tr><th align=left>Evandro Copercini</th><td align=left>ESP32 BT SPP library</td></tr>\
-<tr><th align=left>Limor Fried and Ladyada</th><td align=left>Adafruit BMP085 library</td></tr>\
-<tr><th align=left>Kevin Townsend</th><td align=left>Adafruit BMP280 library</td></tr>\
-<tr><th align=left>Limor Fried and Kevin Townsend</th><td align=left>Adafruit MPL3115A2 library</td></tr>\
-<tr><th align=left>Oliver Kraus</th><td align=left>U8g2 LCD, OLED and eInk library</td></tr>\
-<tr><th align=left>Michael Miller</th><td align=left>NeoPixelBus library</td></tr>\
-<tr><th align=left>Shenzhen Xin Yuan (LilyGO) ET company</th><td align=left>TTGO T-Beam and T-Watch</td></tr>\
-<tr><th align=left>JS Foundation</th><td align=left>jQuery library</td></tr>\
-<tr><th align=left>XCSoar team</th><td align=left>EGM96 data</td></tr>\
-<tr><th align=left>Mike McCauley</th><td align=left>BCM2835 C library</td></tr>\
-<tr><th align=left>Dario Longobardi</th><td align=left>SimpleNetwork library</td></tr>\
-<tr><th align=left>Benoit Blanchon</th><td align=left>ArduinoJson library</td></tr>\
-<tr><th align=left>flashrom.org project</th><td align=left>Flashrom library</td></tr>\
-<tr><th align=left>Robert Wessels and Tony Cave</th><td align=left>EasyLink library</td></tr>\
-<tr><th align=left>Oliver Jowett</th><td align=left>Dump978 library</td></tr>\
-<tr><th align=left>Phil Karn</th><td align=left>FEC library</td></tr>\
-<tr><th align=left>Lewis He</th><td align=left>AXP20X library</td></tr>\
-<tr><th align=left>Bodmer</th><td align=left>TFT library</td></tr>\
-<tr><th align=left>Michael Kuyper</th><td align=left>Basic MAC library</td></tr>\
-<tr><th align=left>Tim Eckel and Horst Reiterer</th><td align=left>ToneAC library</td></tr>\
-<tr><th align=left>Moshe Braner</th><td align=left>Collision algorithm for circling aircraft</td></tr>\
+<tr><th align=left>Ivan Grokhotkov</th><td>Arduino core for ESP8266</td></tr>\
+<tr><th align=left>Zak Kemble</th><td>nRF905 library</td></tr>\
+<tr><th align=left>Stanislaw Pusep</th><td>flarm_decode</td></tr>\
+<tr><th align=left>Paul Stoffregen</th><td>Arduino Time Library</td></tr>\
+<tr><th align=left>Mikal Hart</th><td>TinyGPS++ and PString Libraries</td></tr>\
+<tr><th align=left>Phil Burgess</th><td>Adafruit NeoPixel Library</td></tr>\
+<tr><th align=left>Andy Little</th><td>Aircraft and MAVLink Libraries</td></tr>\
+<tr><th align=left>Peter Knight</th><td>TrueRandom Library</td></tr>\
+<tr><th align=left>Matthijs Kooijman</th><td>IBM LMIC and Semtech Basic MAC frameworks for Arduino</td></tr>\
+<tr><th align=left>David Paiva</th><td>ESP8266FtpServer</td></tr>\
+<tr><th align=left>Lammert Bies</th><td>Lib_crc</td></tr>\
+<tr><th align=left>Pawel Jalocha</th><td>OGN library</td></tr>\
+<tr><th align=left>Timur Sinitsyn, Tobias Simon, Ferry Huberts</th><td>NMEA library</td></tr>\
+<tr><th align=left>yangbinbin (yangbinbin_ytu@163.com)</th><td>ADS-B encoder C++ library</td></tr>\
+<tr><th align=left>Hristo Gochkov</th><td>Arduino core for ESP32</td></tr>\
+<tr><th align=left>Evandro Copercini</th><td>ESP32 BT SPP library</td></tr>\
+<tr><th align=left>Limor Fried and Ladyada</th><td>Adafruit BMP085 library</td></tr>\
+<tr><th align=left>Kevin Townsend</th><td>Adafruit BMP280 library</td></tr>\
+<tr><th align=left>Limor Fried and Kevin Townsend</th><td>Adafruit MPL3115A2 library</td></tr>\
+<tr><th align=left>Oliver Kraus</th><td>U8g2 LCD, OLED and eInk library</td></tr>\
+<tr><th align=left>Michael Miller</th><td>NeoPixelBus library</td></tr>\
+<tr><th align=left>Shenzhen Xin Yuan (LilyGO) ET company</th><td>TTGO T-Beam and T-Watch</td></tr>\
+<tr><th align=left>JS Foundation</th><td>jQuery library</td></tr>\
+<tr><th align=left>XCSoar team</th><td>EGM96 data</td></tr>\
+<tr><th align=left>Mike McCauley</th><td>BCM2835 C library</td></tr>\
+<tr><th align=left>Dario Longobardi</th><td>SimpleNetwork library</td></tr>\
+<tr><th align=left>Benoit Blanchon</th><td>ArduinoJson library</td></tr>\
+<tr><th align=left>flashrom.org project</th><td>Flashrom library</td></tr>\
+<tr><th align=left>Robert Wessels and Tony Cave</th><td>EasyLink library</td></tr>\
+<tr><th align=left>Oliver Jowett</th><td>Dump978 library</td></tr>\
+<tr><th align=left>Phil Karn</th><td>FEC library</td></tr>\
+<tr><th align=left>Lewis He</th><td>AXP20X library</td></tr>\
+<tr><th align=left>Bodmer</th><td>TFT library</td></tr>\
+<tr><th align=left>Michael Kuyper</th><td>Basic MAC library</td></tr>\
+<tr><th align=left>Tim Eckel and Horst Reiterer</th><td>ToneAC library</td></tr>\
+<tr><th align=left>Moshe Braner</th><td>Collision algorithm for circling aircraft</td></tr>\
 </table>\
 <hr>\
 Copyright (C) 2015-2021 &nbsp;&nbsp;&nbsp; Linar Yusupov\
@@ -185,7 +210,7 @@ Copyright (C) 2015-2021 &nbsp;&nbsp;&nbsp; Linar Yusupov\
 
 void set_upload(char *buf, const char *filename, const char *pageurl)
 {
-  snprintf_P ( buf, 300, PSTR(
+  snprintf_P ( buf, 320, PSTR(
  "<html>\
  <p>Select and upload %s</p>\
  <form method='POST' action='%s' enctype='multipart/form-data'>\
@@ -212,7 +237,7 @@ void serve_html(const char *html)
     SoC->swSer_enableRx(true);
 }
 
-void serve_file(File file, const char *filename, const char *rambuf=NULL)
+void serve_file(File file, const char *filename, const char *RAMbuf=NULL)
 {
     char buf[64];
     snprintf(buf, 64, "attachment; filename=%s", filename);
@@ -220,8 +245,8 @@ void serve_file(File file, const char *filename, const char *rambuf=NULL)
     server.sendHeader("Content-Type", octet);
     server.sendHeader("Content-Disposition", buf);
     server.sendHeader("Connection", "close");
-    if (rambuf)
-        server.send(200, octet, rambuf);  // must be null-terminated
+    if (RAMbuf)
+        server.send(200, octet, RAMbuf);  // must be null-terminated
     else
         server.streamFile(file, octet);
     SoC->swSer_enableRx(true);
@@ -231,9 +256,13 @@ void anyUpload(bool toSD)
 {
   HTTPUpload& uploading = server.upload();
 
-  if(uploading.status == UPLOAD_FILE_START)
+  if (uploading.status == UPLOAD_FILE_START)
   {
     String filename = uploading.filename;
+    if (filename.c_str()[0] == '\0') {
+        server.send(500, textplain, "no file specified");
+        return;
+    }
 #if defined(USE_SD_CARD)
     if (toSD) {
         if (filename.startsWith("/"))
@@ -243,7 +272,7 @@ void anyUpload(bool toSD)
         Serial.print(F("uploading into SD: "));
         Serial.println(filename);
         UploadFile = SD.open(filename.c_str(), FILE_WRITE);
-        if(! UploadFile)
+        if (! UploadFile)
             Serial.println(F("Failed to open file for writing on SD"));
     } else
 #endif
@@ -254,21 +283,21 @@ void anyUpload(bool toSD)
         Serial.print(F("uploading into SPIFFS: "));
         Serial.println(filename);
         UploadFile = SPIFFS.open(filename.c_str(), FILE_WRITE);
-        if(! UploadFile)
+        if (! UploadFile)
             Serial.println(F("Failed to open file for writing in SPIFFS"));
     }
 #endif
   }
   else if (uploading.status == UPLOAD_FILE_WRITE)
   {
-    if(UploadFile) {
+    if (UploadFile) {
       size_t loaded = UploadFile.write(uploading.buf, uploading.currentSize);
       // Serial.print(F("... bytes: ")); Serial.println(loaded);
     }
   } 
   else if (uploading.status == UPLOAD_FILE_END)
   {
-    if(UploadFile) {
+    if (UploadFile) {
       UploadFile.close();
       Serial.print(F("Uploaded Size: ")); Serial.println(uploading.totalSize);
       if (uploading.totalSize > 0) {
@@ -305,16 +334,17 @@ void wavUpload()   // into SPIFFS
     anyUpload(false);
 }
 
-void logUpload()   // into SD card /logs/
+void sdlogUpload()   // into SD card /logs/
 {
     anyUpload(true);
 }
 
-void alarmlogfile(){
+void alarmlogfile()
+{
 #if defined(USE_SD_CARD)
-    closeSDlog();
+    //closeSDlog();
 #endif
-    closeFlightLog();
+    //closeFlightLog();
     if (AlarmLogOpen) {
       AlarmLog.close();
       AlarmLogOpen = false;
@@ -330,7 +360,8 @@ void alarmlogfile(){
     }
 }
 
-void settingsdownload(){
+void settingsdownload()
+{
     if (! SPIFFS.exists("/settings.txt")) {
         server.send(404, textplain, "settings file does not exist");
         return;
@@ -342,11 +373,13 @@ void settingsdownload(){
     }
 }
 
-void settingsupload(){
+void settingsupload()
+{
     anyUpload(false);   // into SPIFFS
 }
 
-void settingsbackup(){
+void settingsbackup()
+{
     if (! SPIFFS.exists("/settings.txt"))
         save_settings_to_file();
     if (! SPIFFS.exists("/settings.txt")) {
@@ -366,8 +399,9 @@ void settingsbackup(){
       PSTR("<html><p align=center><h3 align=center>Copied settings.txt to settingb.txt</h3></p></html>"));
 }
 
-void settingsreboot(int status, const char *msg){
-
+void settingsreboot(int status, const char *msg)
+{
+  close_logs();
   char buf[440];
   snprintf_P ( buf, 440,
       PSTR("<html>\
@@ -382,10 +416,6 @@ void settingsreboot(int status, const char *msg){
 </body>\
 </html>"), msg);
   server.send(status, texthtml, buf);
-
-  //Serial.println(F("New settings:"));
-  //show_settings_serial();
-
   SoC->WDT_fini();
   if (SoC->Bluetooth_ops) { SoC->Bluetooth_ops->fini(); }
   //EEPROM_store();
@@ -393,7 +423,8 @@ void settingsreboot(int status, const char *msg){
   reboot();
 }
 
-void settingsswap(){
+void settingsswap()
+{
     if (! SPIFFS.exists("/settingb.txt")) {
         server.send(500, textplain, "settingb.txt backup file does not exist");
         return;
@@ -418,32 +449,58 @@ void settingsswap(){
     }
 }
 
-void flightlogfile()
+void delPSRAMlog()
 {
-    closeFlightLog();
+  char buf[180];
+  snprintf_P ( buf, 180, PSTR(
+ "<html>\
+ <h3>Delete the flight data in RAM?</h3>\
+ <input type=button onClick=\"location.href='/dodelramlog'\" value='Delete'>\
+ </html>"));
+  server.send(200, texthtml, buf);
+}
+void dodelPSRAMlog()
+{
+  clearPSRAMlog();
 
-    if (PSRAMbuf) {
-      if (! FlightLogPath[0]) {
+  char buf[180];
+  snprintf_P ( buf, 180,
+    PSTR("<html><h3>Flight log RAM cleared</h3>%s</html>"), home);
+  server.send(200, texthtml, buf);
+}
+
+// download current RAM flight log
+void RAMlogfile()
+{
+    if (! PSRAMbuf || ! PSRAMbufUsed || ! FlightLogPath[0]) {
           Serial.println(F("no flight log in PSRAM"));
-          server.send ( 404, textplain, "no flight log in PSRAM");
+          server.send ( 404, textplain, "no flight log in RAM");
           return;
-      }
-      // the only method that worked was to append a null char
-      //    and handle the PSRAMbuf log as a C-string:
-      // server.send(200, octet, PSRAMbuf);
-      // server.sendContent() did not work
-      //    it puts the content in the web page despite "Disposition"
-      PSRAMbuf[PSRAMbufUsed] = '\0';
-      File file;   // dummy - rambuf will be used instead
-      serve_file(file, FlightLogPath, PSRAMbuf);
-      delay(2000);
-      return;
     }
 
+    closeFlightLog();
+
+    // the only method that worked was to append a null char
+    //    and handle the PSRAMbuf log as a C-string:
+    // server.send(200, octet, PSRAMbuf);
+    // server.sendContent() did not work
+    //    it puts the content in the web page despite "Disposition"
+    PSRAMbuf[PSRAMbufUsed] = '\0';
+    File file;   // dummy - RAMbuf will be used instead
+    serve_file(file, FlightLogPath+1, PSRAMbuf);
+    delay(2000);
+    return;
+}
+
 #if defined(USE_SD_CARD)
+// download current RAM flight log
+void lastSDlog()
+{
     if (! SD_is_mounted)
         return;
-    closeSDlog();
+
+    closeFlightLog();
+    //closeSDlog();
     String lastlog = " ";
     bool found = false;
     if (FlightLogPath[0]) {            // the last file written since boot
@@ -459,7 +516,7 @@ void flightlogfile()
         }
         File file = root.openNextFile();
         String file_name;
-        while(file){
+        while(file) {
             file_name = file.name();
             if (file_name.endsWith(".IGC") || file_name.endsWith(".igc")) {
                 if (strcmp(lastlog.c_str(), file.name()) < 0) {
@@ -489,8 +546,8 @@ void flightlogfile()
     } else {
         server.send ( 404, textplain, "No flight log found");
     }
-#endif
 }
+#endif
 
 void handleSettings() {
 
@@ -502,7 +559,7 @@ void handleSettings() {
   if (hw_info.model == SOFTRF_MODEL_PRIME_MK2 /* && hw_info.revision >= 5 */)
     is_prime_mk2 = true;
 
-  size_t size = 15000;
+  size_t size = 10000;
   size_t totalsize = size;
   char *offset;
   size_t len = 0;
@@ -513,7 +570,7 @@ void handleSettings() {
     return;
   }
 
-  Serial.println(F("Constructing settings page..."));
+  Serial.println(F("Constructing basic settings page..."));
 
   offset = Settings_temp;
 
@@ -522,33 +579,33 @@ void handleSettings() {
     PSTR("<html>\
 <head>\
 <meta name='viewport' content='width=device-width, initial-scale=1'>\
-<title>Settings</title>\
+<title>Basic Settings</title>\
 </head>\
 <body>\
-<h1 align=center>SoftRF Settings</h1>\
-<h4 align=center>%s</h4>\
-<h4 align=center>If changed, click 'Save and restart' at the bottom</h4>\
-<form action='/input' method='GET'>\
 <table width=100%%>\
+<tr>\
+<td align=center><input type=button onClick=\"location.href='/'\" value='Home'></td>\
+<td align=center><h2>Basic Settings</h2></td>\
+<td align=center><input type=button onClick=\"location.href='/advstgs'\" value='Advanced Settings'></td>\
+</tr>\
+<tr><td>&nbsp;</td><th>(%s)</th><td>&nbsp;</td></tr>\
+<tr><td>&nbsp;</td><th>If changed, click 'Save and restart' at the bottom</th><td>&nbsp;</td></tr>\
+</table>\
+<form action='/input' method='GET'>\
+<table border=1 frame=hsides rules=rows width=100%%>\
 <tr>\
 <th align=left>Mode</th>\
 <td align=right>\
 <select name='mode'>\
 <option %s value='%d'>Normal</option>\
-<option %s value='%d'>More NMEA</option>\
 <option %s value='%d'>GNSS Bridge</option>\
 <option %s value='%d'>UAV</option>\
 <option %s value='%d'>Bridge</option>\
 </select>\
 </td>\
 </tr>"),
-  ((settings->debug_flags & DEBUG_SIMULATE)? "Warning: simulation mode" :
-  (settings_used==STG_DEFAULT? "Warning: reverted to default settings" :
-  (BTpaused ? "Bluetooth paused, reboot to resume" :
-  (settings_used==STG_EEPROM? "Old user settings read from EEPROM" :
-    "Restored user settings from file on boot")))),
+  page_message(),
   (settings->mode == SOFTRF_MODE_NORMAL ? "selected" : "") , SOFTRF_MODE_NORMAL,
-  (settings->mode == SOFTRF_MODE_MORENMEA ? "selected" : "") , SOFTRF_MODE_MORENMEA,
   (settings->mode == SOFTRF_MODE_GPSBRIDGE ? "selected" : ""), SOFTRF_MODE_GPSBRIDGE,
   (settings->mode == SOFTRF_MODE_UAV ? "selected" : ""), SOFTRF_MODE_UAV,
   (settings->mode == SOFTRF_MODE_BRIDGE ? "selected" : ""), SOFTRF_MODE_BRIDGE
@@ -606,36 +663,6 @@ void handleSettings() {
   len = strlen(offset);
   offset += len;
   size -= len;
-
-    snprintf_P ( offset, size,
-      PSTR("\
-<tr>\
-<th align=left>Aircraft ID to ignore</th>\
-<td align=right>\
-<INPUT type='text' name='ignore_id' maxlength='6' size='6' value='%06X'>\
-</td>\
-</tr>"),
-  settings->ignore_id);
-
-  len = strlen(offset);
-  offset += len;
-  size -= len;
-
-    snprintf_P ( offset, size,
-      PSTR("\
-<tr>\
-<th align=left>Aircraft ID to follow</th>\
-<td align=right>\
-<INPUT type='text' name='follow_id' maxlength='6' size='6' value='%06X'>\
-</td>\
-</tr>"),
-  settings->follow_id);
-
-  len = strlen(offset);
-  offset += len;
-  size -= len;
-
-  yield();
 
   /* Radio specific part 1 */
   if (hw_info.rf == RF_IC_SX1276 || hw_info.rf == RF_IC_SX1262) {
@@ -731,17 +758,7 @@ void handleSettings() {
 <option %s value='%d'>None</option>\
 <option %s value='%d'>Distance</option>\
 <option %s value='%d'>Vector</option>\
-<option %s value='%d'>Legacy</option>\
-</select>\
-</td>\
-</tr>\
-<tr>\
-<th align=left>Tx Power</th>\
-<td align=right>\
-<select name='txpower'>\
-<option %s value='%d'>Full</option>\
-<option %s value='%d'>Low</option>\
-<option %s value='%d'>Off</option>\
+<option %s value='%d'>Latest</option>\
 </select>\
 </td>\
 </tr>\
@@ -753,27 +770,6 @@ void handleSettings() {
 <option %s value='%d'>Soft</option>\
 <option %s value='%d'>Loud</option>\
 <option %s value='%d'>External</option>\
-</select>\
-</td>\
-</tr>\
-<tr>\
-<th align=left>Strobe</th>\
-<td align=right>\
-<select name='strobe'>\
-<option %s value='%d'>Off</option>\
-<option %s value='%d'>Alarm</option>\
-<option %s value='%d'>Airborne</option>\
-<option %s value='%d'>Always</option>\
-</select>\
-</td>\
-</tr>\
-<tr>\
-<th align=left>LED ring direction</th>\
-<td align=right>\
-<select name='pointer'>\
-<option %s value='%d'>CoG Up</option>\
-<option %s value='%d'>North Up</option>\
-<option %s value='%d'>Off</option>\
 </select>\
 </td>\
 </tr>"),
@@ -801,33 +797,12 @@ void handleSettings() {
   (settings->alarm == TRAFFIC_ALARM_NONE ? "selected" : ""),  TRAFFIC_ALARM_NONE,
   (settings->alarm == TRAFFIC_ALARM_DISTANCE ? "selected" : ""),  TRAFFIC_ALARM_DISTANCE,
   (settings->alarm == TRAFFIC_ALARM_VECTOR ? "selected" : ""),  TRAFFIC_ALARM_VECTOR,
-  (settings->alarm == TRAFFIC_ALARM_LEGACY ? "selected" : ""),  TRAFFIC_ALARM_LEGACY,
-  (settings->txpower == RF_TX_POWER_FULL ? "selected" : ""),  RF_TX_POWER_FULL,
-  (settings->txpower == RF_TX_POWER_LOW ? "selected" : ""),  RF_TX_POWER_LOW,
-  (settings->txpower == RF_TX_POWER_OFF ? "selected" : ""),  RF_TX_POWER_OFF,
+  (settings->alarm == TRAFFIC_ALARM_LATEST ? "selected" : ""),  TRAFFIC_ALARM_LATEST,
   (settings->volume == BUZZER_OFF ? "selected" : ""), BUZZER_OFF,
   (settings->volume == BUZZER_VOLUME_LOW ? "selected" : ""), BUZZER_VOLUME_LOW,
   (settings->volume == BUZZER_VOLUME_FULL ? "selected" : ""), BUZZER_VOLUME_FULL,
-  (settings->volume == BUZZER_EXT ? "selected" : ""), BUZZER_EXT,
-  (settings->strobe == STROBE_OFF ? "selected" : ""), STROBE_OFF,
-  (settings->strobe == STROBE_ALARM ? "selected" : ""), STROBE_ALARM,
-  (settings->strobe == STROBE_AIRBORNE ? "selected" : ""), STROBE_AIRBORNE,
-  (settings->strobe == STROBE_ALWAYS ? "selected" : ""), STROBE_ALWAYS,
-  (settings->pointer == DIRECTION_TRACK_UP ? "selected" : ""), DIRECTION_TRACK_UP,
-  (settings->pointer == DIRECTION_NORTH_UP ? "selected" : ""), DIRECTION_NORTH_UP,
-  (settings->pointer == LED_OFF ? "selected" : ""), LED_OFF
+  (settings->volume == BUZZER_EXT ? "selected" : ""), BUZZER_EXT
   );
-
-#if 0
-<tr>\
-<th align=left>Demo Buzzer & Strobe</th>\
-<td align=right>\
-<input type='radio' name='alarm_demo' value='0' %s>Off\
-<input type='radio' name='alarm_demo' value='1' %s>On\
-</td>\
-</tr>\
-//  (!settings->alarm_demo ? "checked" : "") , (settings->alarm_demo ? "checked" : ""),
-#endif
 
   len = strlen(offset);
   offset += len;
@@ -840,16 +815,6 @@ void handleSettings() {
     snprintf_P ( offset, size,
       PSTR("\
 <tr>\
-<th align=left>Voice Warnings</th>\
-<td align=right>\
-<select name='voice'>\
-<option %s value='%d'>Off</option>\
-<option %s value='%d'>Internal DAC</option>\
-<option %s value='%d'>External I2S</option>\
-</select>\
-</td>\
-</tr>\
-<tr>\
 <th align=left>Built-in Bluetooth</th>\
 <td align=right>\
 <select name='bluetooth'>\
@@ -858,41 +823,10 @@ void handleSettings() {
 <option %s value='%d'>LE</option>\
 </select>\
 </td>\
-</tr>\
-<tr>\
-<th align=left>TCP mode (if used)</th>\
-<td align=right>\
-<select name='tcpmode'>\
-<option %s value='%d'>Server</option>\
-<option %s value='%d'>Client</option>\
-</select>\
-</td>\
-</tr>\
-<tr>\
-<th align=left>&nbsp;&nbsp;&nbsp;&nbsp;Host IP (if TCP client):</th>\
-<td align=right>\
-<INPUT type='text' name='host_ip' maxlength='15' value='%s' size='16' ></td>\
-</tr>\
-<tr>\
-<th align=left>&nbsp;&nbsp;&nbsp;&nbsp;Host port (if TCP client):</th>\
-<td align=right>\
-<select name='tcpport'>\
-<option %s value='%d'>2000</option>\
-<option %s value='%d'>8880</option>\
-</select>\
-</td>\
 </tr>"),
-    (settings->voice == VOICE_OFF ? "selected" : ""), VOICE_OFF,
-    (settings->voice == VOICE_INT ? "selected" : ""), VOICE_INT,
-    (settings->voice == VOICE_EXT ? "selected" : ""), VOICE_EXT,
     (settings->bluetooth == BLUETOOTH_OFF ? "selected" : ""), BLUETOOTH_OFF,
     (settings->bluetooth == BLUETOOTH_SPP ? "selected" : ""), BLUETOOTH_SPP,
-    (settings->bluetooth == BLUETOOTH_LE_HM10_SERIAL ? "selected" : ""), BLUETOOTH_LE_HM10_SERIAL,
-    (settings->tcpmode == TCP_MODE_SERVER ? "selected" : ""), TCP_MODE_SERVER,
-    (settings->tcpmode == TCP_MODE_CLIENT ? "selected" : ""), TCP_MODE_CLIENT,
-     settings->host_ip,
-    (settings->tcpport == 0 ? "selected" : ""), 0,
-    (settings->tcpport == 1 ? "selected" : ""), 1
+    (settings->bluetooth == BLUETOOTH_LE_HM10_SERIAL ? "selected" : ""), BLUETOOTH_LE_HM10_SERIAL
     );
 
     len = strlen(offset);
@@ -906,26 +840,12 @@ void handleSettings() {
   snprintf_P ( offset, size,
     PSTR("\
 <tr>\
-<th align=left>WiFi (optional):</th>\
-</tr>\
-<tr>\
-<th align=left>&nbsp;&nbsp;&nbsp;&nbsp;SSID (external, or custom):</th>\
-<td align=right>\
-<INPUT type='text' name='ssid' maxlength='18' value='%s' size='16' ></td>\
-</tr>\
-<tr>\
-<th align=left>&nbsp;&nbsp;&nbsp;&nbsp;PSK (blank for custom SSID):</th>\
-<td align=right>\
-<INPUT type='password' name='psk' maxlength='16' value='%s' size='16' ></td>\
-</tr>\
-<tr>\
 <th align=left>NMEA primary output</th>\
 <td align=right>\
 <select name='nmea_out'>\
 <option %s value='%d'>Off</option>\
 <option %s value='%d'>UDP</option>\
 <option %s value='%d'>Serial</option>"),
-  settings->ssid, "hidepass",
   (settings->nmea_out == DEST_NONE  ? "selected" : ""), DEST_NONE,
   (settings->nmea_out == DEST_UDP   ? "selected" : ""), DEST_UDP,
   (settings->nmea_out == DEST_UART  ? "selected" : ""), DEST_UART);
@@ -967,50 +887,30 @@ void handleSettings() {
 <th align=left>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;GNSS</th>\
 <td align=right>\
 <input type='radio' name='nmea_g' value='0' %s>Off\
-<input type='radio' name='nmea_g' value='1' %s>On\
-</td>\
-</tr>\
-<tr>\
-<th align=left>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Private</th>\
-<td align=right>\
-<input type='radio' name='nmea_p' value='0' %s>Off\
-<input type='radio' name='nmea_p' value='1' %s>On\
-</td>\
-</tr>\
-<tr>\
-<th align=left>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Legacy</th>\
-<td align=right>\
-<input type='radio' name='nmea_l' value='0' %s>Off\
-<input type='radio' name='nmea_l' value='1' %s>On\
+<input type='radio' name='nmea_g' value='%d' %s>On\
 </td>\
 </tr>\
 <tr>\
 <th align=left>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Sensors</th>\
 <td align=right>\
 <input type='radio' name='nmea_s' value='0' %s>Off\
-<input type='radio' name='nmea_s' value='1' %s>On\
+<input type='radio' name='nmea_s' value='%d' %s>On\
 </td>\
 </tr>\
 <tr>\
-<th align=left>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Debug</th>\
+<th align=left>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Traffic</th>\
 <td align=right>\
-<input type='radio' name='nmea_d' value='0' %s>Off\
-<input type='radio' name='nmea_d' value='1' %s>On\
-</td>\
-</tr>\
-<tr>\
-<th align=left>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;External</th>\
-<td align=right>\
-<input type='radio' name='nmea_e' value='0' %s>Off\
-<input type='radio' name='nmea_e' value='1' %s>On\
+<input type='radio' name='nmea_t' value='0' %s>Off\
+<input type='radio' name='nmea_t' value='%d' %s>On\
 </td>\
 </tr>"),
-  (!settings->nmea_g ? "checked" : "") , (settings->nmea_g ? "checked" : ""),
-  (!settings->nmea_p ? "checked" : "") , (settings->nmea_p ? "checked" : ""),
-  (!settings->nmea_l ? "checked" : "") , (settings->nmea_l ? "checked" : ""),
-  (!settings->nmea_s ? "checked" : "") , (settings->nmea_s ? "checked" : ""),
-  (!settings->nmea_d ? "checked" : "") , (settings->nmea_d ? "checked" : ""),
-  (!settings->nmea_e ? "checked" : "") , (settings->nmea_e ? "checked" : ""));
+  (!settings->nmea_g ? "checked" : ""),
+   (settings->nmea_g ? settings->nmea_g : 1), (settings->nmea_g ? "checked" : ""),
+  (!settings->nmea_s ? "checked" : ""),
+   (settings->nmea_s ? settings->nmea_s : 1), (settings->nmea_s ? "checked" : ""),
+  (!settings->nmea_t ? "checked" : ""),
+   (settings->nmea_t ? settings->nmea_t : 1), (settings->nmea_t ? "checked" : ""));
+       // - if "on" is chosen keep the bitfield value if not zero, else set to 1 (basic sentences)
 
     len = strlen(offset);
     offset += len;
@@ -1069,42 +969,21 @@ void handleSettings() {
 <th align=left>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;GNSS</th>\
 <td align=right>\
 <input type='radio' name='nmea2_g' value='0' %s>Off\
-<input type='radio' name='nmea2_g' value='1' %s>On\
-</td>\
-</tr>\
-<tr>\
-<th align=left>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Private</th>\
-<td align=right>\
-<input type='radio' name='nmea2_p' value='0' %s>Off\
-<input type='radio' name='nmea2_p' value='1' %s>On\
-</td>\
-</tr>\
-<tr>\
-<th align=left>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Legacy</th>\
-<td align=right>\
-<input type='radio' name='nmea2_l' value='0' %s>Off\
-<input type='radio' name='nmea2_l' value='1' %s>On\
+<input type='radio' name='nmea2_g' value='%d' %s>On\
 </td>\
 </tr>\
 <tr>\
 <th align=left>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Sensors</th>\
 <td align=right>\
 <input type='radio' name='nmea2_s' value='0' %s>Off\
-<input type='radio' name='nmea2_s' value='1' %s>On\
+<input type='radio' name='nmea2_s' value='%d' %s>On\
 </td>\
 </tr>\
 <tr>\
-<th align=left>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Debug</th>\
+<th align=left>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Traffic</th>\
 <td align=right>\
-<input type='radio' name='nmea2_d' value='0' %s>Off\
-<input type='radio' name='nmea2_d' value='1' %s>On\
-</td>\
-</tr>\
-<tr>\
-<th align=left>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;External</th>\
-<td align=right>\
-<input type='radio' name='nmea2_e' value='0' %s>Off\
-<input type='radio' name='nmea2_e' value='1' %s>On\
+<input type='radio' name='nmea2_t' value='0' %s>Off\
+<input type='radio' name='nmea2_t' value='%d' %s>On\
 </td>\
 </tr>\
 <tr>\
@@ -1121,12 +1000,12 @@ void handleSettings() {
 </select>\
 </td>\
 </tr>"),
-  (!settings->nmea2_g ? "checked" : "") , (settings->nmea2_g ? "checked" : ""),
-  (!settings->nmea2_p ? "checked" : "") , (settings->nmea2_p ? "checked" : ""),
-  (!settings->nmea2_l ? "checked" : "") , (settings->nmea2_l ? "checked" : ""),
-  (!settings->nmea2_s ? "checked" : "") , (settings->nmea2_s ? "checked" : ""),
-  (!settings->nmea2_d ? "checked" : "") , (settings->nmea2_d ? "checked" : ""),
-  (!settings->nmea2_e ? "checked" : "") , (settings->nmea2_e ? "checked" : ""),
+  (!settings->nmea2_g ? "checked" : ""),
+   (settings->nmea2_g ? settings->nmea2_g : 1), (settings->nmea2_g ? "checked" : ""),
+  (!settings->nmea2_s ? "checked" : ""),
+   (settings->nmea2_s ? settings->nmea2_s : 1), (settings->nmea2_s ? "checked" : ""),
+  (!settings->nmea2_t ? "checked" : ""),
+   (settings->nmea2_t ? settings->nmea2_t : 1), (settings->nmea2_t ? "checked" : ""),
   (settings->baud_rate == BAUD_DEFAULT ? "selected" : ""), BAUD_DEFAULT,
   (settings->baud_rate == BAUD_4800    ? "selected" : ""), BAUD_4800,
   (settings->baud_rate == BAUD_9600    ? "selected" : ""), BAUD_9600,
@@ -1139,254 +1018,11 @@ void handleSettings() {
     offset += len;
     size -= len;
 
-  if (SoC->id == SOC_ESP32) {
-    if (is_prime_mk2) {
-  snprintf_P ( offset, size,
-    PSTR("\
-<tr>\
-<th align=left>Serial Port RX pin:</th>\
-<td align=right>\
-<select name='altpin0'>\
-<option %s value='%d'>\"RX\"</option>\
-<option %s value='%d'>\"VP\"</option>\
-</select>\
-</td>\
-</tr>\
-<tr>\
-<th align=left>Aux Serial Port Baud Rate:</th>\
-<td align=right>\
-<select name='baudrate2'>\
-<option %s value='%d'>Disabled</option>\
-<option %s value='%d'>4800</option>\
-<option %s value='%d'>9600</option>\
-<option %s value='%d'>19200</option>\
-<option %s value='%d'>38400</option>\
-<option %s value='%d'>57600</option>\
-<option %s value='%d'>115200</option>\
-</select>\
-</td>\
-</tr>\
-<tr>\
-<th align=left>Aux Serial Port Logic:</th>\
-<td align=right>\
-<select name='invert2'>\
-<option %s value='%d'>Normal</option>\
-<option %s value='%d'>Inverted</option>\
-</select>\
-</td>\
-</tr>\
-<tr>\
-<th align=left>UDP Port for NMEA output:</th>\
-<td align=right>\
-<select name='alt_udp'>\
-<option %s value='%d'>10110</option>\
-<option %s value='%d'>10111</option>\
-</select>\
-</td>\
-</tr>"),
-    (!settings->altpin0 ? "selected" : ""), 0,
-    ( settings->altpin0 ? "selected" : ""), 1,
-    (settings->baudrate2 == BAUD_DEFAULT ? "selected" : ""), BAUD_DEFAULT,
-    (settings->baudrate2 == BAUD_4800    ? "selected" : ""), BAUD_4800,
-    (settings->baudrate2 == BAUD_9600    ? "selected" : ""), BAUD_9600,
-    (settings->baudrate2 == BAUD_19200   ? "selected" : ""), BAUD_19200,
-    (settings->baudrate2 == BAUD_38400   ? "selected" : ""), BAUD_38400,
-    (settings->baudrate2 == BAUD_57600   ? "selected" : ""), BAUD_57600,
-    (settings->baudrate2 == BAUD_115200  ? "selected" : ""), BAUD_115200,
-    (!settings->invert2 ? "selected" : ""), 0,
-    ( settings->invert2 ? "selected" : ""), 1,
-    (!settings->alt_udp ? "selected" : ""), 0,
-    ( settings->alt_udp ? "selected" : ""), 1
-    );
-  
-  len = strlen(offset);
-  offset += len;
-  size -= len;
-
-  }
-  }
-
   yield();
-
-  /* Common part 4 */
-  // actually for now only on T-Beam
-  if (SoC->id == SOC_ESP32) {
-    if (is_prime_mk2) {
-
-  snprintf_P ( offset, size,
-    PSTR("\
-</select>\
-</td>\
-</tr>\
-<tr>\
-<th align=left>Internal ADS-B Receiver</th>\
-<td align=right>\
-<select name='rx1090'>\
-<option %s value='%d'>None</option>\
-<option %s value='%d'>GNS5892</option>\
-</tr>\
-</tr>\
-<tr>\
-<th align=left>Mode S:</th>\
-<td align=right>\
-<select name='mode_s'>\
-<option %s value='%d'>Excluded</option>\
-<option %s value='%d'>Included</option>\
-</select>\
-</td>\
-</tr>\
-<tr>\
-<th align=left>GDL90 Input</th>\
-<td align=right>\
-<select name='gdl90_in'>\
-<option %s value='%d'>Off</option>\
-<option %s value='%d'>Serial</option>\
-<option %s value='%d'>Serial2</option>\
-<option %s value='%d'>UDP</option>\
-<option %s value='%d'>Bluetooth</option>\
-<option %s value='%d'>TCP</option>"),
-  (settings->rx1090 == ADSB_RX_NONE    ? "selected" : ""), ADSB_RX_NONE,
-  (settings->rx1090 == ADSB_RX_GNS5892 ? "selected" : ""), ADSB_RX_GNS5892,
-  (!settings->mode_s ? "selected" : ""), 0,
-  ( settings->mode_s ? "selected" : ""), 1,
-  (settings->gdl90_in == DEST_NONE  ? "selected" : ""), DEST_NONE,
-  (settings->gdl90_in == DEST_UART  ? "selected" : ""), DEST_UART,
-  (settings->gdl90_in == DEST_UART2 ? "selected" : ""), DEST_UART2,
-  (settings->gdl90_in == DEST_UDP   ? "selected" : ""), DEST_UDP,
-  (settings->gdl90_in == DEST_BLUETOOTH ? "selected" : ""), DEST_BLUETOOTH,
-  (settings->gdl90_in == DEST_TCP       ? "selected" : ""), DEST_TCP);
-
-  len = strlen(offset);
-  offset += len;
-  size -= len;
-
-    }
-  }
-
-  /* common */
-  snprintf_P ( offset, size,
-    PSTR("\
-</tr>\
-<tr>\
-<th align=left>GDL90 output</th>\
-<td align=right>\
-<select name='gdl90'>\
-<option %s value='%d'>Off</option>\
-<option %s value='%d'>Serial</option>\
-<option %s value='%d'>UDP</option>"),
-  (settings->gdl90 == DEST_NONE ? "selected" : ""), DEST_NONE,
-  (settings->gdl90 == DEST_UART ? "selected" : ""), DEST_UART,
-  (settings->gdl90 == DEST_UDP  ? "selected" : ""), DEST_UDP);
-
-  len = strlen(offset);
-  offset += len;
-  size -= len;
-
-  /* SoC specific part 5 */
-  if (SoC->id == SOC_ESP32) {
-    if (is_prime_mk2) {
-      snprintf_P ( offset, size,
-        PSTR("<option %s value='%d'>Serial 2</option>"),
-        (settings->gdl90 == DEST_UART2 ? "selected" : ""), DEST_UART2);
-      len = strlen(offset);
-      offset += len;
-      size -= len;
-    }
-    snprintf_P ( offset, size,
-      PSTR("\
-<option %s value='%d'>Bluetooth</option>\
-<option %s value='%d'>TCP</option>"),
-  (settings->gdl90 == DEST_BLUETOOTH ? "selected" : ""), DEST_BLUETOOTH,
-  (settings->gdl90 == DEST_TCP ? "selected" : ""), DEST_TCP);
-    len = strlen(offset);
-    offset += len;
-    size -= len;
-  }
-
-#if !defined(EXCLUDE_D1090)
-  /* Common part 5 */
-  snprintf_P ( offset, size,
-    PSTR("\
-</select>\
-</td>\
-</tr>\
-<tr>\
-<th align=left>Dump1090 output</th>\
-<td align=right>\
-<select name='d1090'>\
-<option %s value='%d'>Off</option>\
-<option %s value='%d'>Serial</option>"),
-  (settings->d1090 == DEST_NONE ? "selected" : ""), DEST_NONE,
-  (settings->d1090 == DEST_UART ? "selected" : ""), DEST_UART,
-  (settings->d1090 == DEST_UDP  ? "selected" : ""), DEST_UDP);
-
-  len = strlen(offset);
-  offset += len;
-  size -= len;
-
-  /* SoC specific part 4 */
-  if (SoC->id == SOC_ESP32) {
-    if (is_prime_mk2) {
-      snprintf_P ( offset, size,
-        PSTR("<option %s value='%d'>Serial 2</option>"),
-        (settings->d1090 == DEST_UART2 ? "selected" : ""), DEST_UART2);
-      len = strlen(offset);
-      offset += len;
-      size -= len;
-    }
-    snprintf_P ( offset, size,
-      PSTR("\
-<option %s value='%d'>Bluetooth</option>\
-<option %s value='%d'TCP</option>"),
-  (settings->d1090 == DEST_BLUETOOTH ? "selected" : ""), DEST_BLUETOOTH,
-  (settings->d1090 == DEST_TCP ? "selected" : ""), DEST_TCP);
-
-    len = strlen(offset);
-    offset += len;
-    size -= len;
-  }
-#endif
 
   /* Common part 6 */
   snprintf_P ( offset, size,
     PSTR("\
-</select>\
-</td>\
-</tr>\
-<tr>\
-<th align=left>Geoid Separation (m)</th>\
-<td align=right>\
-<INPUT type='number' name='geoid' min='-104' max='84' value='%d'>\
-</td>\
-</tr>\
-<tr>\
-<th align=left>Power save</th>\
-<td align=right>\
-<select name='power_save'>\
-<option %s value='%d'>Disabled</option>\
-<option %s value='%d'>WiFi OFF (10 min.)</option>"
-//<option %s value='%d'>GNSS</option>
-"</select>\
-</td>\
-</tr>\
-<tr>\
-<th align=left>Shutdown if no external power</th>\
-<td align=right>\
-<input type='radio' name='power_ext' value='0' %s>No\
-<input type='radio' name='power_ext' value='1' %s>Yes\
-</td>\
-</tr>\
-<tr>\
-<th align=left>Air-Relay</th>\
-<td align=right>\
-<select name='relay'>\
-<option %s value='%d'>None</option>\
-<option %s value='%d'>Landed</option>\
-<option %s value='%d'>ADS-B</option>\
-<option %s value='%d'>Only</option>\
-</select>\
-</td>\
-</tr>\
 <tr>\
 <th align=left>Stealth</th>\
 <td align=right>\
@@ -1401,15 +1037,6 @@ void handleSettings() {
 <input type='radio' name='no_track' value='1' %s>On\
 </td>\
 </tr>"),
-  settings->geoid,
-  (settings->power_save == POWER_SAVE_NONE ? "selected" : ""), POWER_SAVE_NONE,
-  (settings->power_save == POWER_SAVE_WIFI ? "selected" : ""), POWER_SAVE_WIFI,
-//(settings->power_save == POWER_SAVE_GNSS ? "selected" : ""), POWER_SAVE_GNSS,
-  (!settings->power_ext ? "checked" : "") , (settings->power_ext ? "checked" : ""),
-  (settings->relay==RELAY_OFF    ? "selected" : ""), RELAY_OFF,
-  (settings->relay==RELAY_LANDED ? "selected" : ""), RELAY_LANDED,
-  (settings->relay==RELAY_ALL    ? "selected" : ""), RELAY_ALL,
-  (settings->relay==RELAY_ONLY   ? "selected" : ""), RELAY_ONLY,
   (!settings->stealth  ? "checked" : "") , (settings->stealth  ? "checked" : ""),
   (!settings->no_track ? "checked" : "") , (settings->no_track ? "checked" : "")
   );
@@ -1418,54 +1045,8 @@ void handleSettings() {
   offset += len;
   size -= len;
 
-  /* Radio specific part 2 */
-  if (rf_chip && rf_chip->type == RF_IC_SX1276) {
     snprintf_P ( offset, size,
       PSTR("\
-<tr>\
-<th align=left>Radio CF correction (&#177;, kHz)</th>\
-<td align=right>\
-<INPUT type='number' name='rfc' min='-30' max='30' value='%d'>\
-</td>\
-</tr>"),
-    settings->freq_corr);
-
-    len = strlen(offset);
-    offset += len;
-    size -= len;
-  }
-
-  /* whether T-Beam has external GNSS, PPS wire, SD card adapter added */
-  if (hw_info.model == SOFTRF_MODEL_PRIME_MK2) {
-    snprintf_P ( offset, size,
-      PSTR("\
-<tr>\
-<th align=left>GNSS module:</th>\
-<td align=right>\
-<select name='gnss_pins'>\
-<option %s value='%d'>Internal</option>\
-<option %s value='%d'>on pins %s, 4</option>\
-<option %s value='%d'>on pins 13, 2</option>\
-<option %s value='%d'>on pins %d, 14</option>\
-</td>\
-</tr>\
-<tr>\
-<th align=left>Added PPS wire:</th>\
-<td align=right>\
-<input type='radio' name='ppswire' value='0' %s>Absent\
-<input type='radio' name='ppswire' value='1' %s>Present\
-</td>\
-</tr>\
-<tr>\
-<th align=left>SD card slot:</th>\
-<td align=right>\
-<select name='sd_card'>\
-<option %s value='%d'>None</option>\
-<option %s value='%d'>on pins 13,25,2,0</option>\
-<option %s value='%d'>on pins 13,%s,2,0</option>\
-<option %s value='%d'>on LORA pins & 0</option>\
-</td>\
-</tr>\
 <tr>\
 <th align=left>Flight logging:</th>\
 <td align=right>\
@@ -1477,89 +1058,20 @@ void handleSettings() {
 </td>\
 </tr>\
 <tr>\
-<th align=left>Flight log interval:</th>\
+<th align=left>Flight log interval (sec):</th>\
 <td align=right>\
-<select name='loginterval'>\
-<option %s value='%d'>1 sec</option>\
-<option %s value='%d'>2 sec</option>\
-<option %s value='%d'>4 sec</option>\
-<option %s value='%d'>8 sec</option>\
+<INPUT type='number' name='loginterval' min='1' max='255' size='4' value='%d'>\
 </td>\
 </tr>"),
-  (settings->gnss_pins==EXT_GNSS_NONE  ? "selected" : ""), EXT_GNSS_NONE,
-  (settings->gnss_pins==EXT_GNSS_39_4  ? "selected" : ""), EXT_GNSS_39_4,
-        (hw_info.revision < 8 ? "VP" : "VN"),
-  (settings->gnss_pins==EXT_GNSS_13_2  ? "selected" : ""), EXT_GNSS_13_2,
-  (settings->gnss_pins==EXT_GNSS_15_14 ? "selected" : ""), EXT_GNSS_15_14,
-        (hw_info.revision < 8 ? 25 : 15),
-  (!settings->ppswire ? "checked" : "") , (settings->ppswire ? "checked" : ""),
-  (settings->sd_card==SD_CARD_NONE  ? "selected" : ""), SD_CARD_NONE,
-  (settings->sd_card==SD_CARD_13_25 ? "selected" : ""), SD_CARD_13_25,
-  (settings->sd_card==SD_CARD_13_VP ? "selected" : ""), SD_CARD_13_VP,
-        (hw_info.revision < 8 ? "4" : "VP"),
-  (settings->sd_card==SD_CARD_LORA  ? "selected" : ""), SD_CARD_LORA,
   (settings->logflight==FLIGHT_LOG_NONE     ? "selected" : ""), FLIGHT_LOG_NONE,
   (settings->logflight==FLIGHT_LOG_ALWAYS   ? "selected" : ""), FLIGHT_LOG_ALWAYS,
   (settings->logflight==FLIGHT_LOG_AIRBORNE ? "selected" : ""), FLIGHT_LOG_AIRBORNE,
   (settings->logflight==FLIGHT_LOG_TRAFFIC  ? "selected" : ""), FLIGHT_LOG_TRAFFIC,
-  (settings->loginterval==LOG_INTERVAL_1S ? "selected" : ""), LOG_INTERVAL_1S,
-  (settings->loginterval==LOG_INTERVAL_2S ? "selected" : ""), LOG_INTERVAL_2S,
-  (settings->loginterval==LOG_INTERVAL_4S ? "selected" : ""), LOG_INTERVAL_4S,
-  (settings->loginterval==LOG_INTERVAL_8S ? "selected" : ""), LOG_INTERVAL_8S);
-    len = strlen(offset);
-    offset += len;
-    size -= len;
-  }
-
-  if (SoC->id == SOC_ESP32) {
-    snprintf_P ( offset, size,
-      PSTR("\
-<tr>\
-<th align=left>Alarms Log</th>\
-<td align=right>\
-<select name='alarmlog'>\
-<option %s value='%d'>Disabled</option>\
-<option %s value='%d'>Enabled</option>"
-"</select>\
-</td>\
-</tr>\
-<tr>\
-<th align=left>Debug flags (2 HEX digits)</th>\
-<td align=right>\
-<INPUT type='text' name='debug_flags' maxlength='2' size='2' value='%02X'>\
-</td>\
-</tr>"),
-    (settings->logalarms==false ? "selected" : ""), 0,
-    (settings->logalarms==true  ? "selected" : ""), 1,
-    settings->debug_flags);
+   settings->loginterval);
 
     len = strlen(offset);
     offset += len;
     size -= len;
-  }
-
-#if defined(USE_OGN_ENCRYPTION)
-  if (settings->rf_protocol == RF_PROTOCOL_OGNTP) {
-    snprintf_P ( offset, size,
-      PSTR("\
-<tr>\
-<th align=left>IGC key (HEX)</th>\
-<td align=right>\
-<INPUT type='text' name='igc_key' maxlength='32' size='32' value='%08X%08X%08X%08X'>\
-</td>\
-</tr>"),
-  // settings->igc_key[0], settings->igc_key[1], settings->igc_key[2], settings->igc_key[3]);
-    settings->igc_key[0]? 0x88888888 : 0,
-    settings->igc_key[1]? 0x88888888 : 0,
-    settings->igc_key[2]? 0x88888888 : 0,
-    settings->igc_key[3]? 0x88888888 : 0);
-       /* mask the key from prying eyes */
-
-    len = strlen(offset);
-    offset += len;
-    size -= len;
-  }
-#endif
 
   yield();
 
@@ -1577,10 +1089,134 @@ void handleSettings() {
   offset += len;
   Serial.print(F("Settings page size: ")); Serial.print(offset-Settings_temp);
   Serial.print(F(" out of allocated: ")); Serial.println(totalsize);
-  // currently about 12800
+  // currently about 3700
   serve_html(Settings_temp);
   Serial.print(F("Free memory (settings page staging): "));
   Serial.println(ESP.getFreeHeap());
+  delay(1000);
+  free(Settings_temp);
+}
+
+void handleAdvStgs() {
+
+  Serial.println(F("handleAdvStgs()..."));
+
+  stop_bluetooth((size_t)60000);
+
+//  bool is_prime_mk2 = false;
+//  if (hw_info.model == SOFTRF_MODEL_PRIME_MK2 /* && hw_info.revision >= 5 */)
+//    is_prime_mk2 = true;
+
+  size_t size = 15000;
+  size_t totalsize = size;
+  char *offset;
+  size_t len = 0;
+  char *Settings_temp = (char *) malloc(size);
+
+  if (Settings_temp == NULL) {
+    Serial.println(F(">>> not enough RAM"));
+    return;
+  }
+
+  Serial.println(F("Constructing advanced settings page..."));
+
+  offset = Settings_temp;
+
+  snprintf_P ( offset, size,
+    PSTR("<html>\
+<head>\
+<meta name='viewport' content='width=device-width, initial-scale=1'>\
+<title>Advanced Settings</title>\
+</head>\
+<body>\
+<table width=100%%>\
+<tr>\
+<td align=center><input type=button onClick=\"location.href='/'\" value='Home'></td>\
+<td align=center><h2>Advanced Settings</h2></td>\
+<td align=center><input type=button onClick=\"location.href='/settings'\" value='Basic Settings'></td>\
+</tr>\
+<tr><td>&nbsp;</td><th align=center>(%s)</th><td>&nbsp;</td></tr>\
+<tr><td>&nbsp;</td><th align=center>If changed, click 'Save and restart' at the bottom</th><td>&nbsp;</td></tr>\
+</table>\
+<form action='/input' method='GET'>\
+<table border=1 frame=hsides rules=rows width=100%%>"), page_message());
+  len = strlen(offset);
+  offset += len;
+  size -= len;
+
+  for (int i=STG_MODE; i<STG_END; i++) {
+      char buf[64];
+      if (stgdesc[i].type == STG_VOID)
+          continue;
+      if (stgdesc[i].type == STG_HIDDEN)   // only accessible via editing the file
+          continue;
+      if (format_setting(i, false, buf, 64) == false)
+          continue;
+      const char *w = stgdesc[i].label;
+      int comma = strlen(w);
+      const char *v = &buf[comma+1];
+      if (buf[comma] != ',')  // should not happen
+          v = "";
+      if (i == STG_PSK && settings->psk[0] != '\0')
+          v = "********";
+      const char *z = stgcomment[i];
+      if (! z)
+          z = "";
+
+      snprintf_P ( offset, size, PSTR("\
+<tr>\
+<th align=left>&nbsp;&nbsp;%s</th>\
+<td align=center><INPUT type='text' name='%s' maxlength='32' value='%s' size='16'></td>\
+<td align=left>%s</td>\
+</tr>"),
+           w, w, v, z);
+           // the setting's label used both as text and the name of the INPUT
+      len = strlen(offset);
+      offset += len;
+      size -= len;
+      yield();
+  }
+
+#if defined(USE_OGN_ENCRYPTION)
+  if (settings->rf_protocol == RF_PROTOCOL_OGNTP) {
+    snprintf_P ( offset, size,
+      PSTR("\
+<tr>\
+<th align=left>IGC key (HEX)</th>\
+<td align=right>\
+<INPUT type='text' name='igc_key' maxlength='32' size='32' value='%08X%08X%08X%08X'>\
+</td>\
+</tr>"),
+    settings->igc_key[0]? 0x88888888 : 0,
+    settings->igc_key[1]? 0x88888888 : 0,
+    settings->igc_key[2]? 0x88888888 : 0,
+    settings->igc_key[3]? 0x88888888 : 0);
+       /* mask the key from prying eyes */
+
+    len = strlen(offset);
+    offset += len;
+    size -= len;
+  }
+#endif
+
+  snprintf_P ( offset, size,
+    PSTR("\
+</table>\
+<p align=center><INPUT type='submit' value='Save and restart'></p>\
+</form>\
+</body>\
+</html>")
+  );
+  len = strlen(offset);
+  offset += len;
+
+  Serial.print(F("AdvStgs page size: ")); Serial.print(offset-Settings_temp);
+  Serial.print(F(" out of allocated: ")); Serial.println(totalsize);
+  // currently about ------
+  serve_html(Settings_temp);
+  Serial.print(F("Free memory (AdvStgs page staging): "));
+  Serial.println(ESP.getFreeHeap());
+  delay(1000);
   free(Settings_temp);
 }
 
@@ -1594,8 +1230,14 @@ void handleRoot() {
   int min = sec / 60;
   int hr = min / 60;
 
-  float vdd = Battery_voltage() ;
-  bool low_voltage = (Battery_voltage() <= Battery_threshold());
+  float vbat = Battery_voltage();
+  uint8_t low_voltage = (vbat <= Battery_threshold()? 1 : 0);
+  if (vbat < 2.0) {
+      vbat = 0.0;
+      low_voltage = 2;
+  }
+  bool usbpwr = ESP32_onExternalPower();
+  float vusb = (usbpwr? 0.001*(float)ESP32_VbusVoltage() : 0.0);
 
   //time_t timestamp = ThisAircraft.timestamp;
   int hour   = gnss.time.hour();
@@ -1604,38 +1246,45 @@ void handleRoot() {
   char str_lat[16];
   char str_lon[16];
   char str_alt[16];
-  char str_Vcc[8];
+  char str_vbat[8];
+  char str_vusb[8];
 
   size_t size = 4500;
   char *Root_temp = (char *) malloc(size);
   if (Root_temp == NULL) {
-    Serial.println(F(">>> not enough RAM"));
-    return;
+      Serial.println(F(">>> not enough RAM"));
+      return;
   }
 
   dtostrf(ThisAircraft.latitude,  8, 4, str_lat);
   dtostrf(ThisAircraft.longitude, 8, 4, str_lon);
   dtostrf(ThisAircraft.altitude-ThisAircraft.geoid_separation, 7, 1, str_alt);   // MSL
-  dtostrf(vdd, 4, 2, str_Vcc);
+  dtostrf(vbat, 4, 2, str_vbat);
+  dtostrf(vusb, 4, 2, str_vusb);
 
-  char adsb_packets[72];
+  char adsb_s[88];
   if (settings->rx1090 == ADSB_RX_NONE && settings->gdl90_in == DEST_NONE) {
-    adsb_packets[0] = '\0';
+      adsb_s[0] = '\0';
+  } else if (settings->rx1090 != ADSB_RX_NONE && ! rx1090found) {
+      strcpy(adsb_s, "<tr><th align=left>ADS-B receiver not present</th></tr>");
   } else {
-    snprintf(adsb_packets, 72, "<tr><th align=left>ADS-B Packets</th><td align=right>%d</td></tr>",
+      snprintf(adsb_s, 88,
+         "<tr><th align=left>ADS-B Packets</th><td>&nbsp;</td><td align=right>%d</td></tr>",
          adsb_packets_counter);
   }
 
   char traffics[24];
   int acrfts_counter = Traffic_Count();   // maxrssi and adsb_acfts are byproducts
   if (acrfts_counter == 0) {
-    traffics[0] = '0';
-    traffics[1] = '\0';
+      traffics[0] = '\0';
   } else if (adsb_acfts > 0) {
-    snprintf(traffics, 24, "%d&nbsp;(%d ADS-B)", acrfts_counter, adsb_acfts);
+      snprintf(traffics, 24, "(%d ADS-B)", adsb_acfts);
   } else {
-    snprintf(traffics, 24, "%d&nbsp;(max RSSI %d)", acrfts_counter, maxrssi);
+      snprintf(traffics, 24, "(max RSSI %d)", maxrssi);
   }
+
+  size_t spiffs_used = SPIFFS.usedBytes();
+  size_t spiffs_available = SPIFFS.totalBytes() - spiffs_used;
 
   snprintf_P ( Root_temp, size,
     PSTR("<html>\
@@ -1645,8 +1294,12 @@ void handleRoot() {
  </head>\
 <body>\
  <table width=100%%>\
-  <tr><td align=center><h1>SoftRF status</h1></td></tr>\
- %s\
+  <tr>\
+   <td align=center><input type=button onClick=\"location.href='/reboot'\" value='Reboot'></td>\
+   <td align=center><h2>SoftRF status</h2></td>\
+   <td align=center><input type=button onClick=\"location.href='/about'\" value='About'></td>\
+  </tr>\
+  <tr><td>&nbsp;</td><th align=center>(%s)</th><td>&nbsp;</td></tr>\
  </table>\
  <table width=100%%>\
   <tr><th align=left>Device ID</th><td align=right>%06X</td></tr>\
@@ -1664,10 +1317,10 @@ void handleRoot() {
   <tr><td align=left><table><tr><th align=left>Baro&nbsp;&nbsp;</th><td align=right>%s</td></tr></table></td>\
   <td align=right><table><tr><th align=left>AHRS&nbsp;&nbsp;</th><td align=right>%s</td></tr></table></td></tr>"
 #endif /* ENABLE_AHRS */
- "<tr><th align=left>ADS-B receiver %spresent</th></tr>\
-  <tr><th align=left>Uptime</th><td align=right>%02d:%02d:%02d</td></tr>\
+ "<tr><th align=left>Uptime</th><td align=right>%02d:%02d:%02d</td></tr>\
   <tr><th align=left>Free memory</th><td align=right>%u</td></tr>\
   <tr><th align=left>Battery voltage</th><td align=right><font color=%s>%s</font></td></tr>\
+  <tr><th align=left>USB voltage</th><td align=right>%s</td></tr>\
  </table>\
  <table width=100%%>\
   <tr><th align=left>Packets</th>\
@@ -1675,35 +1328,38 @@ void handleRoot() {
    <td align=right>Rx&nbsp;%u</td>\
   </tr>\
   %s\
-  <tr><th align=left>Current traffic</th>\
+  <tr>\
+   <th align=left>Current traffic</th>\
+   <td align=left>%d</td>\
    <td align=right>%s</td>\
   </tr>\
-  <tr><td align=left>\
-   <input type=button onClick=\"location.href='/landed_out'\" value='Landed-Out Mode'></td>\
-   <td align=right>%s</td>\
+  <tr>\
+   <th align=right>Landed-Out Mode %s&nbsp;</th>\
+   <td align=left>\
+    <input type=button onClick=\"location.href='/landed_out'\" value='%s'>\
+   </td>\
+   <td>&nbsp;</td>\
   </tr>\
  </table>\
  <hr>\
- <h3 align=center>Most recent GNSS fix</h3>\
  <table width=100%%>\
-  <tr><th align=left>UTC Time</th><td align=right>%02d:%02d</td></tr>\
-  <tr><th align=left>Satellites</th><td align=right>%d</td></tr>\
-  <tr><th align=left>Latitude</th><td align=right>%s</td></tr>\
-  <tr><th align=left>Longitude</th><td align=right>%s</td></tr>\
-  <tr><td align=left><b>Altitude</b>&nbsp;(%s)</td><td align=right>%s&nbsp;(%s)</td></tr>\
-  %s\
+  <tr><td><h3 align=left>Most recent GNSS fix</h3></td><td>&nbsp;</td><td align=right>%s</td>\
+  <tr><th align=left>UTC Time</th><td><font color=%s>(%s)</font></td><td align=right>%02d:%02d</td></tr>\
+  <tr><th align=left>Satellites</th><td>&nbsp;</td><td align=right>%d</td></tr>\
+  <tr><th align=left>Latitude</th><td>&nbsp;</td><td align=right>%s</td></tr>\
+  <tr><th align=left>Longitude</th><td>&nbsp;</td><td align=right>%s</td></tr>\
+  <tr><td align=left><b>Altitude</b>&nbsp;%s</td><td align=left>%s</td><td align=right>%s</td></tr>\
  </table>\
- <br><hr><br>\
+ <hr>\
  <table width=100%%>\
   <tr>\
-   <td><input type=button onClick=\"location.href='/settings'\" value='Settings'></td>\
-   <td><input type=button onClick=\"location.href='/reboot'\" value='Reboot'></td>\
-   <td><input type=button onClick=\"location.href='/firmware'\" value='Firmware update'></td>\
-   <td><input type=button onClick=\"location.href='/about'\" value='About'></td>\
+   <td align=left><input type=button onClick=\"location.href='/settings'\" value='Basic Settings'></td>\
+   <td align=center><input type=button onClick=\"location.href='/advstgs'\" value='Advanced Settings'></td>\
+   <td align=right><input type=button onClick=\"location.href='/firmware'\" value='Firmware update'></td>\
   </tr>\
  </table>\
- <br><hr>\
- Settings file:\
+ <hr>\
+ <b>Settings file:</b>\
  <table width=100%%>\
   <tr>\
    <td><input type=button onClick=\"location.href='/settingsdownload'\" value='Download'></td>\
@@ -1712,36 +1368,22 @@ void handleRoot() {
    <td><input type=button onClick=\"location.href='/settingsswap'\" value='Restore/Swap'></td>\
   </tr>\
  </table>\
- %s\
  <hr>\
- Alarm Log:\
+ <b>Flight Log:</b>&nbsp;&nbsp;%s\
  <table width=100%%>\
-  <tr>\
-   <td><input type=button onClick=\"location.href='/alarmlog'\" value='Download'></td>\
-   <td><input type=button onClick=\"location.href='/clearlog'\" value='Clear'></td>\
-  </tr>\
+  <tr>%s%s</tr>\
  </table>\
  <hr>\
+ <b>Flash memory:</b>\
  <table width=100%%>\
   <tr>\
-   <td>%d WAV files found</td>\
-   %s\
-  </tr>\
-  <tr>\
-   <td><input type=button onClick=\"location.href='/wavupload'\" value='Upload waves.tar'></td>\
-   <td><input type=button onClick=\"location.href='/format'\" value='Clear ALL files from SPIFFS'></td>\
+   <td align=center>%d bytes used, %d available</td>\
+   <td align=left><input type=button onClick=\"location.href='/listall'\" value='Manage Files'></td>\
   </tr>\
  </table>\
 </body>\
 </html>"),
-    ((settings->debug_flags & DEBUG_SIMULATE)?
-       "<tr><td align=center><h4>(Warning: simulation mode (debug flag 20))</h4></td></tr>" :
-    (settings_used==STG_DEFAULT ?
-       "<tr><td align=center><h4>(Warning: reverted to default settings)</h4></td></tr>" :
-    (BTpaused ?
-       "<tr><td align=center><h4>(Bluetooth paused, reboot to resume)</h4></td></tr>" :
-    (settings_used==STG_EEPROM ?
-       "<tr><td align=center><h4>(Old settings read from EEPROM)</h4></td></tr>" : "")))),
+    page_message(),
     (SoC->getChipId() & 0x00FFFFFF), ThisAircraft.addr, SOFTRF_FIRMWARE_VERSION,
     (SoC == NULL ? "NONE" : SoC->name),
     GNSS_name[hw_info.gnss],
@@ -1750,55 +1392,43 @@ void handleRoot() {
 #if defined(ENABLE_AHRS)
     (ahrs_chip == NULL ? "NONE" : ahrs_chip->name),
 #endif /* ENABLE_AHRS */
-    (rx1090found? "" : "not "),
     hr, min % 60, sec % 60, ESP.getFreeHeap(),
-    low_voltage ? "red" : "green", str_Vcc,
-    tx_packets_counter, rx_packets_counter, adsb_packets, traffics,
-    (landed_out_mode? "reboot to cancel" : "tap to start"),
+    (low_voltage==1? "red" : (low_voltage==0? "green": "black")), str_vbat, str_vusb,
+    tx_packets_counter, rx_packets_counter, adsb_s, acrfts_counter, traffics,
+    (landed_out_mode? "Active" : "Off"),
+    (landed_out_mode? "Stop" : "Activate"),
+    ((hw_info.model == SOFTRF_MODEL_PRIME_MK2) ?
+ "<input type=button onClick=\"location.href='/gps_reset'\" value='Reset GNSS'>" : ""),
+    (isValidGNSSFix() ? (leap_seconds_valid()? "green" : "black") : "red"),
+    (isValidGNSSFix() ? (leap_seconds_valid()? "valid fix" : "leap seconds assumed") : "no valid fix"),
     hour, minute, sats, str_lat, str_lon,
     (isValidGNSSFix() ?
-          (ThisAircraft.geoid_separation==0 ? "above ellipsoid - MSL n.a."
-           : "above MSL")
-           : "no valid fix"),
-    str_alt, (ThisAircraft.airborne? "Airborne" : "Not Airborne"),
-    ((hw_info.model == SOFTRF_MODEL_PRIME_MK2) ?
- "<tr><td align=middle>\
-  <input type=button onClick=\"location.href='/gps_reset'\" value='Reset GNSS'>\
- </td></tr>"
-          : ""),
+          (ThisAircraft.geoid_separation==0 ? "(above ellipsoid - MSL n.a.)"
+           : "(above MSL)") : ""),
+    (isValidGNSSFix() ? (ThisAircraft.airborne? "(Airborne)" : "(Not Airborne)") : ""), str_alt,
+    FlightLogStatus(),
 #if defined(USE_SD_CARD)
-(PSRAMbuf?
-   (PSRAMbufUsed?
-   "<hr><input type=button onClick=\"location.href='/flightlog'\" value='Download Flight Log'>"
-   : "<hr>No flight log in PSRAM yet")
- : (SD_is_mounted?
- "<hr>\
- Flight Logs:\
- <table width=100%%>\
-  <tr>\
-   <td><input type=button onClick=\"location.href='/listlogs'\" value='List'></td>\
-   <td><input type=button onClick=\"location.href='/flightlog'\" value='Download Latest'></td>\
-   <td><input type=button onClick=\"location.href='/clearlogs'\" value='Clear'></td>\
-   <td><input type=button onClick=\"location.href='/clearoldlogs'\" value='Empty trash'></td>\
-  </tr>\
- </table>" : "")),
+(PSRAMbufUsed?
+ "<td align=center><input type=button onClick=\"location.href='/ramfltlog'\" value='Download Current'></td>\
+  <td align=center><input type=button onClick=\"location.href='/delramlog'\" value='Clear Current'></td>" : ""),
+(SD_is_mounted?
+ "<td align=center><input type=button onClick=\"location.href='/lastsdlog'\" value='Download Latest'></td>\
+  <td align=center><input type=button onClick=\"location.href='/listlogs'\" value='List Files'></td>\
+  <td align=center><input type=button onClick=\"location.href='/trashlogs'\" value='Clear Files'></td>"  : 
+ "<td align=center><input type=button onClick=\"location.href='/listlogs'\" value='List Archived'></td>\
+  <td align=center><input type=button onClick=\"location.href='/clearlogs'\" value='Clear Archive'></td>"),
 #else
- (PSRAMbuf?
-   (PSRAMbufUsed?
-   "<hr><input type=button onClick=\"location.href='/flightlog'\" value='Download Flight Log'>"
-   : "<hr>No flight log in PSRAM yet")
- : ""),
+(PSRAMbufUsed?
+ "<td align=center><input type=button onClick=\"location.href='/ramfltlog'\" value='Download Current'></td>\
+  <td align=center><input type=button onClick=\"location.href='/delramlog'\" value='Clear Current'></td>" : ""),
+ "<td align=center><input type=button onClick=\"location.href='/listlogs'\" value='List Archived'></td>\
+  <td align=center><input type=button onClick=\"location.href='/clearlogs'\" value='Clear Archive'></td>",
 #endif
-    num_wav_files,
-#if defined(USE_EGM96)
- "<td><input type=button onClick=\"location.href='/egmupload'\" value='Upload egm96s.dem'></td>"
-#else
- ""
-#endif
+    spiffs_used, spiffs_available
   );
   Serial.print(F("Status page size: ")); Serial.print(strlen(Root_temp));
   Serial.print(F(" out of allocated: ")); Serial.println(size);
-  // currently about 2900
+  // currently about _____
   serve_html(Root_temp);
   free(Root_temp);
   Serial.println(F("Files in SPIFFS:"));
@@ -1812,7 +1442,7 @@ void handleRoot() {
       return;
   }
   File file = root.openNextFile();
-  while(file){
+  while(file) {
       Serial.print("... ");
       Serial.print(file.name());
       Serial.print("  [");
@@ -1829,7 +1459,7 @@ void handleInput() {
   Serial.println(F("Settings from web page:"));
   for ( uint8_t i = 0; i < server.args(); i++ ) {
     if (server.argName(i).equals(stgdesc[STG_PSK].label)) {
-        if (! server.arg(i).equals("hidepass")) {
+        if (! server.arg(i).equals("********")) {
             strncpy(settings->psk, server.arg(i).c_str(), sizeof(settings->psk)-1);
             settings->psk[sizeof(settings->psk)-1] = '\0';
         }
@@ -1871,122 +1501,13 @@ void handleInput() {
   // make some adjustments to settings
   Adjust_Settings();
 
-#if 0
-  /* (do not) show new settings in a web page before rebooting */
-  size_t size = 3900;
-  char *Input_temp = (char *) malloc(size);
-  if (Input_temp != NULL) {
-    snprintf_P ( Input_temp, size,
-PSTR("<html>\
-<head>\
-<meta http-equiv='refresh' content='15; url=/'>\
-<meta name='viewport' content='width=device-width, initial-scale=1'>\
-<title>SoftRF Settings</title>\
-</head>\
-<body>\
-<h1 align=center>New settings:</h1>\
-<table width=100%%>\
-<tr><th align=left>Mode</th><td align=right>%d</td></tr>\
-<tr><th align=left>Aircraft ID</th><td align=right>%06X</td></tr>\
-<tr><th align=left>ID method</th><td align=right>%d</td></tr>\
-<tr><th align=left>Ignore ID</th><td align=right>%06X</td></tr>\
-<tr><th align=left>Follow ID</th><td align=right>%06X</td></tr>\
-<tr><th align=left>Protocol</th><td align=right>%d</td></tr>\
-<tr><th align=left>Band</th><td align=right>%d</td></tr>\
-<tr><th align=left>Aircraft type</th><td align=right>%d</td></tr>\
-<tr><th align=left>Alarm trigger</th><td align=right>%d</td></tr>\
-<tr><th align=left>Tx Power</th><td align=right>%d</td></tr>\
-<tr><th align=left>Volume</th><td align=right>%d</td></tr>\
-<tr><th align=left>Strobe</th><td align=right>%d</td></tr>\
-<tr><th align=left>LED pointer</th><td align=right>%d</td></tr>\
-<tr><th align=left>Voice</th><td align=right>%d</td></tr>\
-<tr><th align=left>Baud 1</th><td align=right>%d</td></tr>\
-<tr><th align=left>Alt RX pin</th><td align=right>%d</td></tr>\
-<tr><th align=left>Baud 2</th><td align=right>%d</td></tr>\
-<tr><th align=left>Invert 2</th><td align=right>%d</td></tr>\
-<tr><th align=left>Alt UDP port</th><td align=right>%d</td></tr>\
-<tr><th align=left>Bluetooth</th><td align=right>%d</td></tr>\
-<tr><th align=left>TCP mode</th><td align=right>%d</td></tr>\
-<tr><th align=left>TCP port</th><td align=right>%d</td></tr>\
-<tr><th align=left>SSID</th><td align=right>%s</td></tr>\
-<tr><th align=left>Host IP</th><td align=right>%s</td></tr>\
-<tr><th align=left>NMEA Out 1</th><td align=right>%d</td></tr>\
-<tr><th align=left>NMEA GNSS</th><td align=right>%s</td></tr>\
-<tr><th align=left>NMEA Private</th><td align=right>%s</td></tr>\
-<tr><th align=left>NMEA Legacy</th><td align=right>%s</td></tr>\
-<tr><th align=left>NMEA Sensors</th><td align=right>%s</td></tr>\
-<tr><th align=left>NMEA Debug</th><td align=right>%s</td></tr>\
-<tr><th align=left>NMEA External</th><td align=right>%s</td></tr>\
-<tr><th align=left>NMEA Out 2</th><td align=right>%d</td></tr>\
-<tr><th align=left>NMEA2 GNSS</th><td align=right>%s</td></tr>\
-<tr><th align=left>NMEA2 Private</th><td align=right>%s</td></tr>\
-<tr><th align=left>NMEA2 Legacy</th><td align=right>%s</td></tr>\
-<tr><th align=left>NMEA2 Sensors</th><td align=right>%s</td></tr>\
-<tr><th align=left>NMEA2 Debug</th><td align=right>%s</td></tr>\
-<tr><th align=left>NMEA2 External</th><td align=right>%s</td></tr>\
-<tr><th align=left>ADS-B Receiver</th><td align=right>%d</td></tr>\
-<tr><th align=left>Mode S</th><td align=right>%d</td></tr>\
-<tr><th align=left>GDL90 in</th><td align=right>%d</td></tr>\
-<tr><th align=left>GDL90 out</th><td align=right>%d</td></tr>\
-<tr><th align=left>DUMP1090</th><td align=right>%d</td></tr>\
-<tr><th align=left>Air-Relay</th><td align=right>%d</td></tr>\
-<tr><th align=left>Stealth</th><td align=right>%s</td></tr>\
-<tr><th align=left>No track</th><td align=right>%s</td></tr>\
-<tr><th align=left>Power save</th><td align=right>%d</td></tr>\
-<tr><th align=left>Power external</th><td align=right>%d</td></tr>\
-<tr><th align=left>Freq. correction</th><td align=right>%d</td></tr>\
-<tr><th align=left>Ext GNSS</th><td align=right>%d</td></tr>\
-<tr><th align=left>PPS wire</th><td align=right>%d</td></tr>\
-<tr><th align=left>Geoid Sep</th><td align=right>%d</td></tr>\
-<tr><th align=left>SD card</th><td align=right>%d</td></tr>\
-<tr><th align=left>Alarm Log</th><td align=right>%d</td></tr>\
-<tr><th align=left>debug_flags</th><td align=right>%02X</td></tr>\
-<tr><th align=left>IGC key</th><td align=right>%08X%08X%08X%08X</td></tr>\
-</table>\
-<hr>\
-  <p align=center><h1 align=center>Restart is in progress... Please, wait!</h1></p>\
-</body>\
-</html>"),
-    settings->mode, settings->aircraft_id, settings->id_method,
-    settings->ignore_id, settings->follow_id,
-    settings->rf_protocol, settings->band,
-    settings->acft_type, settings->alarm, settings->txpower,
-    settings->volume, settings->strobe, settings->pointer, settings->voice,
-    settings->baud_rate, settings->altpin0, settings->baudrate2,
-    settings->invert2, settings->alt_udp, settings->bluetooth,
-    settings->tcpmode, settings->tcpport, settings->ssid, settings->host_ip,
-    settings->nmea_out,
-    BOOL_STR(settings->nmea_g), BOOL_STR(settings->nmea_p), BOOL_STR(settings->nmea_l),
-    BOOL_STR(settings->nmea_s), BOOL_STR(settings->nmea_d), BOOL_STR(settings->nmea_e),
-    settings->nmea_out2,
-    BOOL_STR(settings->nmea2_g), BOOL_STR(settings->nmea2_p), BOOL_STR(settings->nmea2_l),
-    BOOL_STR(settings->nmea2_s), BOOL_STR(settings->nmea2_d), BOOL_STR(settings->nmea2_e),
-    settings->rx1090, settings->mode_s, settings->gdl90_in, settings->gdl90, settings->d1090,
-    settings->relay, BOOL_STR(settings->stealth), BOOL_STR(settings->no_track),
-    settings->power_save, settings->power_ext, settings->freq_corr,
-    settings->gnss_pins, settings->ppswire, settings->geoid,
-    settings->sd_card, settings->logalarms, settings->debug_flags,
-  //  settings->igc_key[0], settings->igc_key[1], settings->igc_key[2], settings->igc_key[3]
-    (settings->igc_key[0]? 0x88888888 : 0),
-    (settings->igc_key[1]? 0x88888888 : 0),
-    (settings->igc_key[2]? 0x88888888 : 0),
-    (settings->igc_key[3]? 0x88888888 : 0)
-        /* do not show the existing secret key */
-    );
-    serve_html(Input_temp);
-    delay(1000);
-    free(Input_temp);
-  }
-#endif
-
   if (SPIFFS.exists("/settingb.txt"))
       SPIFFS.remove("/settingb.txt");
   SPIFFS.rename("/settings.txt","/settingb.txt");
   save_settings_to_file();   // this also shows the new settings
   if (! SPIFFS.exists("/settings.txt")) {   // saving the file failed
       SPIFFS.rename("/settingb.txt","/settings.txt");
-      server.send (500, texthtml,
-        "<html><p align=center><h3 align=center>cannot save the new settings file</h3></p></html>");
+      server.send(500, textplain, "cannot save the new settings file");
       return;
   }
   settingsreboot(200, "New settings saved.");
@@ -1995,7 +1516,7 @@ PSTR("<html>\
 void handleNotFound() {
 
   String message = "File Not Found\n\n";
-  message += "URI: /SD";
+  message += "URI: ";
   message += server.uri();
   message += "\nMethod: ";
   message += ( server.method() == HTTP_GET ) ? "GET" : "POST";
@@ -2010,7 +1531,170 @@ void handleNotFound() {
   server.send ( 404, textplain, message );
 }
 
-bool handleFileRead(String path) { // send the requested file to the client (if it exists)
+void confirmFormat()
+{
+  char buf[240];
+  snprintf_P ( buf, 240, PSTR(
+ "<html>%s\
+ <h3>Format SPIFFS?  All files will be lost!</h3><br><br>\
+ <input type=button onClick=\"location.href='/doformat'\" value='Confirm'>\
+ </html>"), home);
+  server.send(200, texthtml, buf);
+}
+
+enum {
+    FILE_OP_DELETE,
+    FILE_OP_TRASH,
+    FILE_OP_DELTRASH,
+    FILE_OP_DELETE_LOGS,
+    FILE_OP_TRASH_LOGS,
+    FILE_OP_EMPTY_TRASH,
+    FILE_OP_DELALRMLOG
+};
+
+void confirmDelete(int file_op, const char *filename=NULL)
+{
+  char f[32];
+  f[0] = 's';
+  f[1] = '\0';
+  const char *g = "all flight log";
+  char h[32];
+  h[0] = '\0';     // default, will be overwritten below
+  if (filename) {
+      f[0] = ' ';
+      strcpy(f+1,filename);
+      g = "the";
+      if (file_op == FILE_OP_DELETE)
+          strcpy(h,"delete~");
+      else if (file_op == FILE_OP_TRASH)
+          strcpy(h,"trash~");
+      else
+          strcpy(h,"deltrash~");
+      strcpy(h+strlen(h),filename);  // with the extension
+  } else {
+      if (file_op == FILE_OP_DELETE_LOGS)
+          strcpy(h,"doclearlogs");
+      else if (file_op == FILE_OP_TRASH_LOGS)
+          strcpy(h,"dotrashlogs");
+      else if (file_op == FILE_OP_DELALRMLOG) {
+          g = "the alarm log";
+          f[0] = '\0';
+          strcpy(h,"delalrmlog");
+      }
+      else
+          strcpy(h,"doemptytrash");
+  }
+  bool trash = (file_op == FILE_OP_TRASH || file_op == FILE_OP_TRASH_LOGS);
+  char buf[240];
+  snprintf_P ( buf, 240, PSTR(
+ "<html>%s\
+ <h3>%s %s file%s%s?</h3>\
+ <input type=button onClick=\"location.href='/%s'\" value='Confirm'>\
+ </html>"), home, (trash? "Move" : "Delete"), g, f, (trash? " to trash" : ""), h);
+  server.send(200, texthtml, buf);
+}
+
+// handle special URL for file deletion confirmation
+bool confirm_del_file(const char *filename)
+{
+  if (strncmp(filename,"confdel~",8)!=0)
+      return false;
+  confirmDelete(FILE_OP_DELETE, &filename[8]);
+  return true;
+}
+
+// handle special URL for confirmation of move file to trash
+bool confirm_trash_file(const char *filename)
+{
+  if (strncmp(filename,"conftrash~",10)!=0)
+      return false;
+  confirmDelete(FILE_OP_TRASH, &filename[10]);
+  return true;
+}
+
+// handle special URL for confirmation of deleting file in trash
+bool confirm_deltrash_file(const char *filename)
+{
+  if (strncmp(filename,"confdeltrash~",13)!=0)
+      return false;
+  confirmDelete(FILE_OP_DELTRASH, &filename[13]);
+  return true;
+}
+
+// handle special URL for file deletion in SPIFFS
+bool delete_file(const char *filename)
+{
+  if (strncmp(filename,"delete~",7)!=0)
+      return false;
+  String filepath = "/";
+  filepath += &filename[7];
+  if (SPIFFS.exists(filepath)) {
+      SPIFFS.remove(filepath);
+      char buf[148];
+      snprintf_P ( buf, 148, PSTR("<h3>Deleted file %s</h3>%s"), &filename[7], home);
+      server.send(200, texthtml, buf);
+      return true;
+  }
+  char buf[148];
+  snprintf_P ( buf, 148, PSTR("<h3>Cannot delete file SPIFFS%s - not found</h3>%s"),
+                                     filepath.c_str(), home);
+  server.send(404, texthtml, buf);
+  return true;
+}
+
+// handle special URL for moving file from SD/logs to SD/logs/old
+bool trash_file(const char *filename)
+{
+  if (strncmp(filename,"trash~",6)!=0)
+      return false;
+  String filepath = "/logs/";
+  filepath += &filename[6];
+  if (SD.exists(filepath)) {
+      String oldpath = "/logs/old/";
+      filepath += &filename[6];
+      if (SD.exists(oldpath))
+          SD.remove(oldpath);
+      SD.rename(filepath,oldpath);
+      char buf[148];
+      snprintf_P ( buf, 148, PSTR("<h3>SD%s moved to /old/</h3>%s"), filepath, home);
+      server.send(200, texthtml, buf);
+      return true;
+  }
+  char buf[148];
+  snprintf_P ( buf, 148, PSTR("<h3>Cannot move file SD%s - not found</h3>%s"),
+                                     filepath.c_str(), home);
+  server.send(404, texthtml, buf);
+  return true;
+}
+
+// handle special URL for deletion of file within SD/logs/old
+bool del_trash(const char *filename)
+{
+  if (strncmp(filename,"deltrash~",9)!=0)
+      return false;
+  String filepath = "/logs/old/";
+  filepath += &filename[9];
+  if (SD.exists(filepath)) {
+      SD.remove(filepath);
+      char buf[148];
+      snprintf_P ( buf, 148, PSTR("<h3>Deleted file SD%s</h3>%s"),
+                                     filepath.c_str(), home);
+      server.send(200, texthtml, buf);
+      return true;
+  }
+  char buf[148];
+  snprintf_P ( buf, 148, PSTR("<h3>Cannot delete file SD%s - not found</h3>%s"),
+                                     filepath.c_str(), home);
+  server.send(404, texthtml, buf);
+  return true;
+}
+
+// This function is called from onNotFound() and attempts to
+// send the requested file to the client (if it exists)
+// It also handles the processing of requests about specific files
+// such as downloading or deleting a flight log
+
+bool handleFileRead(String path) {
   Serial.println("handleFileRead: " + path);
   if (path.endsWith("/"))
     return false;
@@ -2027,37 +1711,93 @@ bool handleFileRead(String path) { // send the requested file to the client (if 
       --slash;
   }
   filename += slash;    // point to after the last slash
-  // look in SPIFFS first
-  if (SPIFFS.exists(path)) {
-    File file = SPIFFS.open(path, FILE_READ);
-    if (file) {
-        serve_file(file, filename);
-        delay(500);
-        file.close();
+  if (confirm_del_file(filename) == true)       // if special URL for file deletion confirmation
+      return true;
+      // avoid the handleNotFound() message
+  if (confirm_trash_file(filename) == true)     // if URL for confirm SD file move to trash
+      return true;
+  if (confirm_deltrash_file(filename) == true)  // if URL for confirm deletion of SD trash file
+      return true;
+  if (delete_file(filename) == true)            // if special URL for file deletion
+      return true;
+  if (trash_file(filename) == true)             // if special URL for SD file move to trash
+      return true;
+  if (del_trash(filename) == true)              // if special URL for deletion of SD trash file
+      return true;
+  // otherwise... // look in SPIFFS first
+  char zpath[40];
+  strncpy(zpath,filename-1,40);  // includes the "/"
+  bool is_igc = (strlen(filename)==12 && strncmp(filename+8,".IGC",4)==0);
+  if (is_igc) {
+    char lastchar = zpath[12];
+    zpath[12]='Z';
+    if (SPIFFS.exists(zpath) && lastchar == 'C') {
+      // IGC requested but IGZ exists - first decompress then download
+      size_t size = 0;
+      File file = SPIFFS.open(zpath);       
+      if (file)  size = file.size();
+      file.close();
+      if (size == 0)  return false;
+      if (6*size > PSRAMavailable()) {
+          server.send(500, textplain,
+              "Not enough RAM space, save & clear current flight log first");
+          return true;  // avoid the handleNotFound() message
+      }
+      suspendFlightLog();           // close SPIFFS file, pause PSRAM logging
+      if (decompressfile(zpath)) {
+          PSRAMbuf[PSRAMbufUsed] = '\0';
+          serve_file(file, filename, PSRAMbuf);    // 'file' is a dummy argument
+      } else {
+          Serial.println("decompression failed");
+          server.send(500, textplain, "decompression failed");
+      }
+      delay(2000);
+      resumeFlightLog();
+      return true;
     }
-    Serial.println(String(F("\tSent file: SPIFFS")) + path);
-    return true;
+  }
+  // else fall through - includes ".IGZ", resulting in download as-is
+  if (SPIFFS.exists(zpath)) {
+      if (strcmp(zpath,"/alarmlog.txt")==0 && AlarmLogOpen) {
+          AlarmLog.close();
+          AlarmLogOpen = false;
+      }
+      File file = SPIFFS.open(zpath, FILE_READ);
+      if (file) {
+          serve_file(file, filename);
+          delay(500);
+          file.close();
+      }
+      Serial.println(String(F("\tSent file: SPIFFS")) + path);
+      return true;
   }
 #if defined(USE_SD_CARD)
   // if not found in SPIFFS, look on SD card
-  if (SD.exists(path)) {
-    File file = SD.open(path, FILE_READ);
-    if (file) {
-        serve_file(file, filename);
-        delay(500);
-        file.close();
-    }
-    Serial.println(String(F("\tSent file: SD")) + path);
-    return true;
+  if (strncmp(path.c_str(),"/logs/",6)==0) {
+      strncpy(zpath,path.c_str(),40);
+  } else {
+      strcpy(zpath,"/logs/");
+      strncpy(zpath+6,filename,34);
+  }
+  if (SD.exists(zpath)) {
+      if (strcmp(zpath,"/logs/sdlog.txt")==0)
+          closeSDlog();
+      File file = SD.open(zpath, FILE_READ);
+      if (file) {
+          serve_file(file, filename);
+          delay(500);
+          file.close();
+      }
+      Serial.println(String(F("\tSent file: SD")) + zpath);
+      return true;
   }
 #endif
-  Serial.println(String(F("\tFile Not Found: ")) + path);
+  Serial.println(String(F("\tFile Not Found: ")) + zpath);
   return false;
 }
 
-#if defined(USE_SD_CARD)
+// list flight log (or all) files, in SD/logs/ or in SPIFFS/
 
-// list files in SD/logs/
 int igc2num(char c)
 {
     if (c >= '0' && c <= '9')
@@ -2066,196 +1806,388 @@ int igc2num(char c)
         return (c - 'A' + 10);
     return 0;
 }
+
 #define FILELSTSIZ 8000
-void handleListLogs()
+
+// the modes list_files() can work in:
+enum {
+    LIST_SPIFFS_LOGS,
+    LIST_SPIFFS_ALL,
+    LIST_SD_LOGS,
+    LIST_SD_OLD,
+    LIST_SD_ALL
+};
+
+void list_files(int mode)
 {
-  if (ThisAircraft.airborne==0 || (settings->debug_flags & DEBUG_SIMULATE)) {
-      closeFlightLog();
-      closeSDlog();
-  }
-  File root = SD.open("/logs");
-  if (! root) {
-      Serial.println(F("Cannot open SD/logs"));
-      server.send ( 500, textplain, "(cannot open SD/logs)");
-      return;
-  }
   char *filelist = (char *) malloc(FILELSTSIZ);
   if (! filelist) {
       Serial.println(F("cannot allocate memory for file list"));
-      server.send ( 500, textplain, "(cannot allocate memory for file list)");
-      root.close();
+      server.send ( 500, textplain, "Cannot allocate memory for file list");
       return;
   }
-  Serial.println(F("Files in SD/logs:"));
-  snprintf(filelist, FILELSTSIZ, "Files in SD/logs:<br>");
+  int len = 0;
+  char *cp = filelist;
+  int more;
+  if (mode == LIST_SPIFFS_ALL || mode == LIST_SPIFFS_LOGS) {
+      size_t spiffs_used = SPIFFS.usedBytes();
+      size_t spiffs_available = SPIFFS.totalBytes() - spiffs_used;
+  }
+  File root;
+  const char *folder = "/";
+  const char *del_op = "confdel~";   // delete after confirmation
+  const char *igc_suffix = ".IGC";
+  if (mode == LIST_SPIFFS_LOGS || mode == LIST_SPIFFS_ALL) {
+      root = SPIFFS.open("/");
+      igc_suffix = ".IGZ";
+      size_t spiffs_used = SPIFFS.usedBytes();
+      size_t spiffs_available = SPIFFS.totalBytes() - spiffs_used;
+      Serial.println(F("Files in SPIFFS/:"));
+      snprintf(filelist, FILELSTSIZ, "%s%sFiles in flash: (%d bytes available)<br><br>",
+           home, (mode==LIST_SPIFFS_LOGS? "Flight Log " : ""), spiffs_available);
+#if defined(USE_SD_CARD)
+  } else if (mode == LIST_SD_OLD) {
+      folder = "/logs/old/";
+      del_op = "confdeltrash~";     // delete after confirmation
+      root = SD.open("/logs/old");
+      Serial.println(F("Files in SD/logs/old:"));
+      snprintf(filelist, FILELSTSIZ, "%sFiles in SD/logs/old:<br><br>", home);
+  } else if (mode == LIST_SD_LOGS) {
+      folder = "/logs/";
+      del_op = "conftrash~";        // move to /old
+      root = SD.open("/logs");
+      Serial.println(F("Flight log files in SD/logs:"));
+      snprintf(filelist, FILELSTSIZ, "%sFlight log files in SD/logs:<br><br>", home);
+  } else {    // LIST_SD_ALL 
+      folder = "/logs/";
+      del_op = "conftrash~";        // move to /old
+      root = SD.open("/logs");
+      Serial.println(F("Files in SD/logs:"));
+      snprintf(filelist, FILELSTSIZ, "%sFiles in SD/logs:<br><br>", home);
+#endif
+  }
+  if (! root) {
+      Serial.println(F("Cannot open files folder"));
+      server.send ( 500, textplain, "Cannot open files folder");
+      free(filelist);
+      return;
+  }
+  more = strlen(cp);
+  len += more;
+  cp  += more;
   int nfiles = 0;
+  int nlogs = 0;
   File file = root.openNextFile();
-  while(file){
-    if(!file.isDirectory()){
+  for (; file; file=root.openNextFile()) {
+      if (file.isDirectory())
+          continue;
       Serial.print("  ");
-      const char *fn = file.name();
+      char fn[32];
+      strncpy(fn,file.name(),32);
       Serial.print(fn);
       Serial.print("  [");
       Serial.print(file.size());
       Serial.println(" bytes]");
       String file_name = fn;
-      int len = strlen(filelist);
-      if (len < FILELSTSIZ-130) {
-        if (file_name.endsWith(".IGC")) {
+      bool is_igc = file_name.endsWith(igc_suffix);
+      if (is_igc)
+          ++nlogs;
+      if (! is_igc && (mode == LIST_SPIFFS_LOGS || mode == LIST_SD_LOGS))
+          continue;
+      if (len < FILELSTSIZ-160) {
+        strcpy(cp, "&nbsp;<a href=\"");
+        more = strlen(cp);
+        len += more;
+        cp  += more;
+        if (is_igc) {
+          if (mode == LIST_SPIFFS_LOGS || mode == LIST_SPIFFS_ALL)
+              fn[11] = 'C';   // replace "IGZ" with "IGC" - will decompress before download
           int year = igc2num(fn[0]);
-          snprintf(filelist+len, FILELSTSIZ-len,
-             "&nbsp;&nbsp;<a href=\"/logs/%s\">%s</a>&nbsp;&nbsp;[20%d%d-%02d-%02d]&nbsp;&nbsp;[%d bytes]<br>",
-                   fn, fn, (year<4? 3 : 2), year, igc2num(fn[1]), igc2num(fn[2]), file.size());
+          snprintf(cp, FILELSTSIZ-len,
+            "%s%s\">%s</a>&nbsp;[20%d%d-%02d-%02d]&nbsp;[%d bytes]",
+            folder, fn, file.name(), (year<4? 3 : 2), year, igc2num(fn[1]), igc2num(fn[2]), file.size());
         } else {
-          snprintf(filelist+len, FILELSTSIZ-len,
-             "&nbsp;&nbsp;<a href=\"/logs/%s\">%s</a>&nbsp;&nbsp;&nbsp;&nbsp;[%d bytes]<br>",
-                   fn, fn, file.size());
+          snprintf(cp, FILELSTSIZ-len,
+            "%s%s\">%s</a>&nbsp;&nbsp;&nbsp;&nbsp;[%d bytes]",
+            folder, fn, fn, file.size());
         }
+        more = strlen(cp);
+        len += more;
+        cp  += more;
+        // use special URLs for file deletion ops
+        file_name = del_op;
+        file_name += file.name();
+        snprintf(cp, FILELSTSIZ-len, "&nbsp;&nbsp;<a href=\"/%s\">Delete</a><br>", file_name.c_str());            
+        more = strlen(cp);
+        len += more;
+        cp  += more;
       } else {
         Serial.println("... and more ...");
-        snprintf(filelist+len, FILELSTSIZ-len, "... and more ...<br>");
+        snprintf(cp, FILELSTSIZ-len, "... and more ...<br>");
+        more = strlen(cp);
+        len += more;
+        cp  += more;
         break;
       }
       ++nfiles;
-    }
-    yield();
-    file = root.openNextFile();
+      yield();
+      //file = root.openNextFile();
   }
   if (nfiles == 0) {
       Serial.println("  (none)");
-      int len = strlen(filelist);
-      snprintf(filelist+len, FILELSTSIZ-len, "&nbsp;&nbsp;(none)<br>");
+      snprintf(cp, FILELSTSIZ-len, "&nbsp;&nbsp;(none)<br>");
+      more = strlen(cp);
+      len += more;
+      cp  += more;
   }
   file.close();
   root.close();
+  const char *label = "Back to Home";
+  const char *url = "/";
+  if (len < FILELSTSIZ-120  && nlogs > 0) {
+      if (mode == LIST_SPIFFS_LOGS || mode == LIST_SPIFFS_ALL) {
+          label = "Delete All Flight Logs";
+          url = "/clearlogs";
+      }
+      if (mode == LIST_SD_LOGS) {
+          label = "Move All Flight Logs to Trash";
+          url = "/trashlogs";
+      }
+      if (mode == LIST_SD_OLD) {
+          label = "Empty Trash";
+          url = "/emptytrash";
+      }
+      snprintf(cp, FILELSTSIZ-len, "<br><br><input type=button onClick=\"location.href='%s'\" value='%s'>",
+                     url, label);
+      more = strlen(cp);
+      len += more;
+      cp  += more;
+  }
+  if (len < FILELSTSIZ-120) {
+    if (mode == LIST_SD_LOGS) {
+      label = "Open Trash";
+      url = "/listsdold";
+      snprintf(cp, FILELSTSIZ-len, "<br><br><input type=button onClick=\"location.href='%s'\" value='%s'>",
+                     url, label);
+      more = strlen(cp);
+      len += more;
+      cp  += more;
+    }
+  }
+
+  if (mode == LIST_SPIFFS_ALL) {
+
+    if (len < FILELSTSIZ-400) {
+
+      snprintf_P(cp, FILELSTSIZ-len, PSTR(
+ "<br>&nbsp;<hr>&nbsp;<br>\
+ <table width=100%%>\
+  <tr>\
+   <td><input type=button onClick=\"location.href='/clralrmlog'\" value='Clear Alarm Log'></td>\
+   <td><input type=button onClick=\"location.href='/wavupload'\" value='Upload waves.tar'></td>"
+#if defined(USE_EGM96)
+  "<td><input type=button onClick=\"location.href='/egmupload'\" value='Upload egm96s.dem'></td>"
+#endif
+  "<td><input type=button onClick=\"location.href='/format'\" value='FORMAT flash filesystem'></td>\
+  </tr>\
+ </table>"));
+
+    } else if (len < FILELSTSIZ-120) {
+      label = "Upload any file";
+      url = "/anyupload";
+      snprintf(cp, FILELSTSIZ-len, "<br><br><input type=button onClick=\"location.href='%s'\" value='%s'>",
+                     url, label);
+    }
+  }
+
   serve_html(filelist);
+  delay(500);
   free(filelist);
 }
 
-bool handleFlightLogs(bool trash)
+//void list_spiffs_logs() { list_files(LIST_SPIFFS_LOGS); }
+void list_spiffs_all()  { list_files(LIST_SPIFFS_ALL);  }
+//void list_sd_logs()     { list_files(LIST_SD_LOGS);     }
+void list_sd_old()      { list_files(LIST_SD_OLD);      }
+void list_sd_all()      { list_files(LIST_SD_ALL);      }
+
+// automatically choose to list SPIFFS or SD
+void list_logs()
 {
-    bool leftover = false;
-    closeSDlog();
-    closeFlightLog();
-    char *filelist = (char *) malloc(FILELSTSIZ);
-    if (! filelist) {
-        Serial.println("cannot allocate memory for file list");
-        return false;
-    }
-    filelist[FILELSTSIZ-1] = '\0';
-    int nfiles = 0;
-    char *cp = filelist;
-    File root = SD.open(trash? "/logs/old" : "/logs");
-    if (! root) {
-        if (trash) {
-            Serial.println(F("Cannot open SD/logs/old"));
-            server.send ( 500, textplain, "(cannot open SD/logs/old)");
-        } else {
-            Serial.println(F("Cannot open SD/logs"));
-            server.send ( 500, textplain, "(cannot open SD/logs)");
-        }
-        return false;
-    }
-    if (trash)
-        Serial.println(F("deleting old flight logs..."));
+#if defined(USE_SD_CARD)
+    if (SD_is_mounted)
+        list_files(LIST_SD_LOGS);
     else
-        Serial.println(F("clearing flight logs..."));
+        list_files(LIST_SPIFFS_LOGS);
+#else
+    list_files(LIST_SPIFFS_LOGS);
+#endif
+};
+
+void doClearLogs()
+{
+    closeFlightLog();
+    int nfiles = 0;
+    File root = SPIFFS.open("/");
+    if (! root) {
+        Serial.println(F("Cannot open SPIFFS/"));
+        server.send ( 500, textplain, "(cannot open SPIFFS/)");
+        return;
+    }
+    Serial.println(F("clearing flight logs..."));
     File file = root.openNextFile();
     String file_name;
-    while(file){
-        file_name = file.name();
-        if (file_name.endsWith(".IGC") || file_name.endsWith(".igc")) {
-            int len = cp - filelist;
-            if (len < FILELSTSIZ-80) {
-                *cp++ = ((!trash && file.size()>4000)? '1' : '0');
-                strcpy(cp, file.name());
-                Serial.print("  ");
-                Serial.println(cp);
-                cp += strlen(cp) + 1;
-                ++nfiles;
-            } else {
-                leftover = true;
-            }
+    while(file) {
+        file_name = "/";
+        file_name += file.name();
+        file = root.openNextFile();
+        if (file_name.endsWith(".IGZ")) {
+            SPIFFS.remove(file_name);
+            Serial.print("...");
+            Serial.println(file_name);
+            ++nfiles;
         }
         yield();
-        file = root.openNextFile();
     }
     file.close();
     root.close();
-    *cp = '\0';      // signals no more files (besides the count in nfiles)
-    cp = filelist;   // rewind list
-    String logpath, oldpath;
-    while (nfiles > 0 && *cp) {
-        bool move = (*cp++ == '1');
-        size_t len = strlen(cp);
+    Serial.print("Deleted ");
+    Serial.print(nfiles);
+    Serial.println(" flight log files");
+    char buf[148];
+    snprintf_P ( buf, 148, PSTR("<h3>Deleted %d flight log files</h3>%s"), nfiles, home);
+    server.send(200, texthtml, buf);
+}
+
+void doClearSDLogs()
+{
+#if defined(USE_SD_CARD)
+    closeSDlog();
+    closeFlightLog();
+    int nmoved = 0;
+    int ndeleted = 0;
+    File root = SD.open("/logs");
+    if (! root) {
+        Serial.println(F("Cannot open SD/logs"));
+        server.send ( 500, textplain, "(cannot open SD/logs)");
+        return;
+    }
+    Serial.println(F("clearing flight logs..."));
+    File file = root.openNextFile();
+    String file_name;
+    while(file) {
+        file_name = file.name();
+        String logpath;
         logpath = "/logs/";
-        logpath += cp;
-        oldpath = "/logs/old/";
-        oldpath += cp;
-        if (move) {            // move large files
-            if (SD.exists(oldpath)) {
-                if (SD.remove(oldpath))
-                    Serial.print("removed: ");    // old file with same name
-                else
+        logpath += file_name;
+        bool move = (file.size() > 4000);
+        file = root.openNextFile();
+        if (file_name.endsWith(".IGC") || file_name.endsWith(".igc")) {
+            if (move) {            // move large files
+                String oldpath;
+                oldpath = "/logs/old/";
+                oldpath += file_name;
+                if (SD.exists(oldpath)) {
+                    if (SD.remove(oldpath))
+                        Serial.print("removed: ");    // old file with same name
+                    else
+                        Serial.print("failed to remove: ");
+                    Serial.println(oldpath);
+                }
+                if (SD.rename(logpath,oldpath)) {
+                    Serial.print("moved: ");
+                    ++nmoved;
+                } else {
+                    Serial.print("failed to move: ");
+                }
+            } else {       // delete small files
+                if (SD.remove(logpath)) {
+                    Serial.print("removed: ");
+                    ++ndeleted;
+                } else {
                     Serial.print("failed to remove: ");
-                Serial.println(oldpath);
+                }
             }
-            if (SD.rename(logpath,oldpath))
-                Serial.print("moved: ");
-            else
-                Serial.print("failed to move: ");
-        } else {              // delete small (or old) files
-            if (SD.remove(trash? oldpath : logpath))
-                Serial.print("removed: ");
-            else
-                Serial.print("failed to remove: ");
+            Serial.println(logpath);
         }
-        Serial.println(cp);
-        cp += len + 1;
-        --nfiles;
         yield();
     }
-    free(filelist);
+    file.close();
+    root.close();
+    Serial.print("Moved ");
+    Serial.print(nmoved);
+    Serial.print(" files to /old and deleted ");
+    Serial.print(ndeleted);
+    Serial.println(" small files");
+    char buf[148];
+    snprintf_P ( buf, 148, PSTR("<h3>Moved %d files to /old/</h3>%s"), nmoved, home);
+    server.send(200, texthtml, buf);
+#endif
+}
 
-
-    if (trash)
-        server.send ( 200, texthtml,
-        "<html><p align=center><h3 align=center>old flight logs deleted</h3></p></html>");
-    else
-        server.send ( 200, texthtml,
-        "<html><p align=center><h3 align=center>flight logs cleared</h3></p></html>");
-    return leftover;
+void doEmptyTrash()
+{
+#if defined(USE_SD_CARD)
+    int nfiles = 0;
+    File root = SD.open("/logs/old");
+    if (! root) {
+        Serial.println(F("Cannot open SD/logs/old"));
+        server.send ( 500, textplain, "(cannot open SD/logs/old)");
+    }
+    Serial.println(F("deleting old flight logs..."));
+    File file = root.openNextFile();
+    String file_name;
+    while(file) {
+        file_name = file.name();
+        file = root.openNextFile();
+        if (file_name.endsWith(".IGC") || file_name.endsWith(".igc")) {
+            SD.remove(file_name);
+            Serial.print("...");
+            Serial.println(file_name);
+            ++nfiles;
+        }
+        yield();
+    }
+    file.close();
+    root.close();
+    Serial.print("Deleted ");
+    Serial.print(nfiles);
+    Serial.println(" files from /old");
+    char buf[148];
+    snprintf_P ( buf, 148, PSTR("<h3>Deleted %d files in /old/</h3>%s"), nfiles, home);
+    server.send(200, texthtml, buf);
+#endif
 }
 
 void handleClearLogs()
 {
-    bool leftover = true;
-    while (leftover) {
-        leftover = handleFlightLogs(false);
-    }
+    confirmDelete(FILE_OP_DELETE_LOGS);
 }
 
-void handleClearOldLogs()
+void handleClearSDLogs()
 {
-    bool leftover = true;
-    while (leftover) {
-        leftover = handleFlightLogs(true);
-    }
+    confirmDelete(FILE_OP_TRASH_LOGS);
 }
 
-#endif   // SD_CARD
+void handleEmptyTrash()
+{
+    confirmDelete(FILE_OP_EMPTY_TRASH);
+}
+
+void confdelalarmlog()
+{
+    confirmDelete(FILE_OP_DELALRMLOG);
+}
 
 void Web_setup()
 {
   server.on ( "/", handleRoot );
 
   server.on ( "/settings", handleSettings );
+  server.on ( "/advstgs",  handleAdvStgs );
 
   server.on ( "/reboot", []() {
     Serial.println(F("Rebooting from web page..."));
-    //server.send(200, textplain, "Rebooting...");
-    //delay(600);
-    //reboot();
     settingsreboot(200, "");
   } );
 
@@ -2270,10 +2202,19 @@ void Web_setup()
   } );
 
   server.on ( "/landed_out", []() {
-    landed_out_mode = true;
-    OLED_msg("LANDED", "OUT");
-    server.send(200, texthtml,
-      "<html><p align=center><h3 align=center>LANDED-OUT MODE ACTIVATED</h3></p></html>");
+    if (landed_out_mode) {
+        landed_out_mode = false;
+        OLED_msg("NORMAL", "MODE");
+        Serial.println("landed_out_mode off");
+        server.send(200, texthtml,
+          "<html><p align=center><h3 align=center>LANDED-OUT MODE STOPPED</h3></p></html>");
+    } else {
+        landed_out_mode = true;
+        OLED_msg("LANDED", "OUT");
+        Serial.println("landed_out_mode on");
+        server.send(200, texthtml,
+          "<html><p align=center><h3 align=center>LANDED-OUT MODE ACTIVATED</h3></p></html>");
+    }
   } );
 
   server.on ( "/testmode", []() {
@@ -2295,22 +2236,21 @@ void Web_setup()
     gnss_needs_reset = true;
     server.send(200, texthtml,
       "<html><p align=center><h3 align=center>Factory reset & cold-start GNSS...</h3></p></html>");
-    //delay(4000);
-    //Serial.println(F("Rebooting..."));
-    //delay(2000);
-    //reboot();
   } );
 
-  server.on ( "/format", []() {
+  server.on ( "/format", confirmFormat );
+  server.on ( "/doformat", []() {
+    closeFlightLog();
     clear_waves();
     Serial.println(F("Formatting spiffs..."));
     SPIFFS.format();
-    server.send(200, textplain, "SPIFFS cleared");
+    server.send(200, textplain, "SPIFFS cleared, suggest saving settings now!");
   } );
 
   server.on ( "/wavupload", []() {
-    char buf[300];
+    char buf[320];
     set_upload(buf, "waves.tar (read instructions first)", "/dowavupld");
+    serve_html(buf);
   } );
   server.on ("/dowavupld", HTTP_POST,  // if the client posts to the upload page
     [](){ server.send(200); },         // Send 200 to tell the client we are ready to receive
@@ -2318,7 +2258,7 @@ void Web_setup()
   );
 
   server.on ( "/egmupload", []() {
-    char buf[300];
+    char buf[320];
     set_upload(buf, "egm96s.dem", "/doegmupld");
     serve_html(buf);
   } );
@@ -2329,18 +2269,18 @@ void Web_setup()
 
 #if defined(USE_SD_CARD)
   server.on ( "/logupload", []() {
-    char buf[300];
+    char buf[320];
     set_upload(buf, "a file into SD/logs", "/dologupld");
     serve_html(buf);
   } );
   server.on ("/dologupld", HTTP_POST,  // if the client posts to the upload page
     [](){ server.send(200); },         // Send 200 to tell the client we are ready to receive
-    logUpload                          // Receive and save the file
+    sdlogUpload                        // Receive and save the file
   );
 #endif
 
   server.on ( "/settingsupload", []() {
-    char buf[300];
+    char buf[320];
     set_upload(buf, "settings.txt", "/dostgupld");
     serve_html(buf);
   } );
@@ -2354,8 +2294,8 @@ void Web_setup()
   server.on ( "/settingsswap",     settingsswap );
 
   server.on ( "/alarmlog", alarmlogfile );
-
-  server.on ( "/clearlog", []() {
+  server.on ( "/clralrmlog", confdelalarmlog );
+  server.on ( "/delalrmlog", []() {
     if (SPIFFS.exists("/alarmlog.txt")) {
         if (AlarmLogOpen) {
           AlarmLog.close();
@@ -2366,11 +2306,28 @@ void Web_setup()
     server.send(200, textplain, "Alarm Log cleared");
   } );
 
-  server.on ( "/flightlog", flightlogfile );
-#if defined(USE_SD_CARD)
-  server.on ( "/listlogs", handleListLogs );
+  // PSRAM
+  server.on ( "/ramfltlog", RAMlogfile );
+  server.on ( "/delramlog", delPSRAMlog );
+  server.on ( "/dodelramlog", dodelPSRAMlog );
+
+  // SPIFFS
+  server.on ( "/listall", list_spiffs_all );
   server.on ( "/clearlogs", handleClearLogs );
-  server.on ( "/clearoldlogs", handleClearOldLogs );
+  server.on ( "/doclearlogs", doClearLogs );
+
+  // either SPIFFS or SD
+  server.on ( "/listlogs", list_logs );
+
+#if defined(USE_SD_CARD)
+  // SD card
+  server.on ( "/lastsdlog", lastSDlog );
+  server.on ( "/listsdold", list_sd_old );
+  server.on ( "/listsdall", list_sd_all );
+  server.on ( "/trashlogs", handleClearSDLogs );
+  server.on ( "/dotrashlogs", doClearSDLogs );
+  server.on ( "/emptytrash", handleEmptyTrash );
+  server.on ( "/doemptytrash", doEmptyTrash );
 #endif
 
   server.on ( "/input", handleInput );
@@ -2419,7 +2376,7 @@ void Web_setup()
     SoC->swSer_enableRx(false);
 #if defined(USE_SD_CARD)
     closeFlightLog();     // OTA while PSRAM logging will lose the log
-#endif /* USE_SD_CARD */
+#endif
     server.sendHeader(String(F("Connection")), String(F("close")));
     server.sendHeader(String(F("Access-Control-Allow-Origin")), "*");
     //server.send(200, textplain, (Update.hasError())?"UPDATE FAILED":"UPDATE DONE, REBOOTING");
@@ -2438,7 +2395,7 @@ void Web_setup()
     //SoC->reset();
   },[](){
     HTTPUpload& upload = server.upload();
-    if(upload.status == UPLOAD_FILE_START){
+    if (upload.status == UPLOAD_FILE_START) {
       Serial.setDebugOutput(true);
       SoC->WiFiUDP_stopAll();
       SoC->WDT_fini();
@@ -2453,8 +2410,8 @@ void Web_setup()
         OLED_msg("UPDATE", "FAILED");
         Serial.println("update.begin failed");
       }
-    } else if(upload.status == UPLOAD_FILE_WRITE){
-      if(Update.write(upload.buf, upload.currentSize) != upload.currentSize){
+    } else if (upload.status == UPLOAD_FILE_WRITE) {
+      if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
         Update.printError(Serial);
         blue_LED_4hz();
         OLED_msg("UPDATE", "FAILED");
@@ -2473,8 +2430,8 @@ void Web_setup()
           OLED_msg("UPDATE", buf);
         }
       }
-    } else if(upload.status == UPLOAD_FILE_END){
-      if(Update.end(true)){ //true to set the size to the current progress
+    } else if (upload.status == UPLOAD_FILE_END) {
+      if (Update.end(true)) { //true to set the size to the current progress
         Serial.printf("\r\nUpdate Success: %u\r\nRebooting...\r\n", upload.totalSize);
         blue_LED_on();
         OLED_msg("UPDATE", "SUCCESS");
@@ -2505,6 +2462,7 @@ void Web_loop()
 {
   server.handleClient();
   if (reboot_pending) {
+    close_logs();
     delay(2000);
     SoC->reset();
   }
@@ -2515,10 +2473,6 @@ void Web_fini()
   server.stop();
 }
 
-#else
-void Web_setup()    {}
-void Web_loop()     {}
-void Web_fini()     {}
 #endif /* ESP32 */
 
 #endif /* EXCLUDE_WIFI */

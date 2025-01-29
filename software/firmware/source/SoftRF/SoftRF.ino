@@ -56,6 +56,8 @@
  *   SdFat library is developed by Bill Greiman
  *   Arduino MIDI library is developed by Francois Best (Forty Seven Effects)
  *   Arduino uCDB library is developed by Ioulianos Kakoulidis
+ *   Wind estimation and collision algorithm for circling aircraft by Moshe Braner
+ *   Optimized ADS-B decoding by Moshe Braner
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -366,7 +368,6 @@ Serial.println(ESP.getFreePsram());
 
   SoC->WDT_setup();
 
-Serial.println("... setup() done");
 //Serial.print("hw_info.model=");
 //Serial.print(hw_info.model);
 //Serial.print(", revision=");
@@ -384,11 +385,25 @@ Serial.println(ESP.getFreePsram());
 Serial.print("settings_used=");
 Serial.println(settings_used);
 
+#if defined(ARDUINO_ARCH_NRF52)
+    // check if any .IGX files need decompression
+    //Serial.println("FlightLog_decomp()...");
+    FlightLog_decomp();
+#endif
+
   SetupTimeMarker = millis();
+
+Serial.println("\r\n... setup() done\r\n");
+Serial.println("Current settings:");
+show_settings_serial();
+Serial.println("");
 }
 
 void shutparts()
 {
+  SoC->WDT_fini();
+  if (SoC->Bluetooth_ops)
+     SoC->Bluetooth_ops->fini();
   closeFlightLog();
   if (AlarmLogOpen)
     AlarmLog.close();
@@ -409,9 +424,6 @@ void shutparts()
   WiFi_fini();
 #endif
   RF_Shutdown();
-  SoC->WDT_fini();
-  if (SoC->Bluetooth_ops)
-     SoC->Bluetooth_ops->fini();
   if (SoC->USB_ops)
      SoC->USB_ops->fini();
   if (settings->mode != SOFTRF_MODE_UAV)
@@ -472,6 +484,7 @@ void normal()
             Serial.print(F("GNSS reported geoid separation: "));
             Serial.println(gnss.separation.meters());
         }
+        (void) leap_seconds_valid();    // computes leap_seconds_correction
         SetupTimeMarker = millis();
         prev_lat = gnss.location.lat();
         prev_lon = gnss.location.lng();
@@ -604,25 +617,21 @@ void normal()
     if ((settings->debug_flags & DEBUG_SIMULATE) == 0) {
 
       // check for newly received data, usually returns false
-      // >>> do this here too to ensure no incoming packets are missed
+      // >>> do this here (too?) to ensure no incoming packets are missed
       rx_tried = true;
       rx_success = RF_Receive();
 if (rx_success) which_rx_try = 1;
       // if received a packet, postpone transmission until next time around the loop().
 
-      if (!rx_success && RF_Transmit_Ready() && (!relay_waiting || RF_current_slot != 0)) {
-        // Don't bother with the encode() if can't transmit right now
-        // Reserve slot 0 for relay message if any relaying is pending
-        //   (this only happens once in 5 or more seconds)
-        if (settings->relay != RELAY_ONLY && leap_seconds_valid()) {
+      if (!rx_success && RF_Transmit_Ready() && settings->relay != RELAY_ONLY) {
+          // Don't bother with the encode() if can't transmit right now
           size_t s = RF_Encode(&ThisAircraft);  // returns 0 if implausible data
           if (s != 0) {
-            RF_Transmit(s, true);
-            // if actually transmitted, time-slot is then locked out
-            if (RF_Transmit_Ready()==false || TxEndMarker==0)
-              tx_success = true;
+              RF_Transmit(s);
+              // if actually transmitted, time-slot is then locked out
+              if (RF_Transmit_Happened())
+                tx_success = true;
           }
-        }
       }
       /* - this only actually transmits when some preset random time is reached */
 
@@ -643,10 +652,11 @@ if (rx_success) which_rx_try = 1;
 
   if ((settings->debug_flags & DEBUG_SIMULATE) == 0) {
 
-#if 1
+#if 0
 // >>> this may be causing "RF loopback" on sx1262?
 // - nope still get some loopbacks in try1
 // - but with this code included it only happens in try2?
+// - note that the "try1" will be reached again in about 1-2 ms around the loop
     // ensure receiver is re-activated
     if (!rx_tried || tx_success)
       rx_success = RF_Receive();
@@ -688,7 +698,7 @@ if (rx_success) which_rx_try = 2;
       logFlightPosition();
       if (settings->logflight == FLIGHT_LOG_TRAFFIC)
           logCloseTraffic();
-      IGCTimeMarker = ref_time_ms + (1000 << (settings->loginterval)) + 320;
+      IGCTimeMarker = ref_time_ms + (1000 * settings->loginterval) + 320;
     }
 #else
     // on T-Echo don't worry about SPI bus
@@ -696,7 +706,7 @@ if (rx_success) which_rx_try = 2;
       logFlightPosition();
       if (settings->logflight == FLIGHT_LOG_TRAFFIC)
           logCloseTraffic();
-      IGCTimeMarker = ref_time_ms + (1000 << (settings->loginterval)) + 320;
+      IGCTimeMarker = ref_time_ms + (1000 * settings->loginterval) + 320;
     }
 #endif
   }
@@ -757,7 +767,7 @@ void uav()
     ThisAircraft.pressure_altitude = the_aircraft.location.baro_alt;
     ThisAircraft.hdop = the_aircraft.location.gps_hdop;
 
-    RF_Transmit(RF_Encode(&ThisAircraft), true);
+    RF_Transmit(RF_Encode(&ThisAircraft));
   }
 
   success = RF_Receive();
@@ -781,7 +791,7 @@ void bridge()
   size_t tx_size = WiFi_Receive_UDP(&TxBuffer[0], MAX_PKT_SIZE);
 
   if (tx_size > 0) {
-    RF_Transmit(tx_size, true);
+    RF_Transmit(tx_size);
   }
 
   success = RF_Receive();
@@ -883,7 +893,7 @@ void txrx_test()
 #if DEBUG_TIMING
   tx_start_ms = millis();
 #endif
-  RF_Transmit(RF_Encode(&ThisAircraft), true);
+  RF_Transmit(RF_Encode(&ThisAircraft));
 #if DEBUG_TIMING
   tx_end_ms = millis();
   rx_start_ms = millis();

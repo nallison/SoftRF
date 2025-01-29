@@ -91,7 +91,7 @@ NMEA2: USB LD
           (settings->txpower == RF_TX_POWER_FULL ? "TX" :
           (settings->txpower == RF_TX_POWER_LOW  ? "tx" : "--" )),
           Protocol_ID[settings->rf_protocol],
-          (settings->alarm == TRAFFIC_ALARM_LEGACY ? "LEG" :
+          (settings->alarm == TRAFFIC_ALARM_LATEST ? "LAT" :
           (settings->alarm == TRAFFIC_ALARM_VECTOR ? "VCT" :
           (settings->alarm == TRAFFIC_ALARM_DISTANCE ? "DST" : "---"))));
       display->getTextBounds(info_line, 0, 0, &tbx, &tby, &tbw, &tbh);
@@ -140,14 +140,14 @@ NMEA2: USB LD
       int i = 0;
       if (settings->nmea_g)
         nmeas[i++] = 'G';
-      if (settings->nmea_p)
-        nmeas[i++] = 'P';
-      if (settings->nmea_l)
-        nmeas[i++] = 'L';
       if (settings->nmea_s)
         nmeas[i++] = 'S';
+      if (settings->nmea_t)
+        nmeas[i++] = 'T';
       if (settings->nmea_d)
         nmeas[i++] = 'D';
+      if (settings->nmea_p)
+        nmeas[i++] = 'P';
       if (i == 0)
         nmeas[i++] = '-';
       nmeas[i] = '\0';
@@ -167,14 +167,14 @@ NMEA2: USB LD
       i = 0;
       if (settings->nmea2_g)
         nmeas[i++] = 'G';
-      if (settings->nmea2_p)
-        nmeas[i++] = 'P';
-      if (settings->nmea2_l)
-        nmeas[i++] = 'L';
       if (settings->nmea2_s)
         nmeas[i++] = 'S';
+      if (settings->nmea2_t)
+        nmeas[i++] = 'T';
       if (settings->nmea2_d)
         nmeas[i++] = 'D';
+      if (settings->nmea2_p)
+        nmeas[i++] = 'P';
       if (i == 0)
         nmeas[i++] = '-';
       nmeas[i] = '\0';

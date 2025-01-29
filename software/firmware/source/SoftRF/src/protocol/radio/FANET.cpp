@@ -226,7 +226,7 @@ bool fanet_decode(void *fanet_pkt, container_t *this_aircraft, ufo_t *fop) {
 
     fop->protocol = RF_PROTOCOL_FANET;
     fop->addr     = (pkt->vendor << 16) | pkt->address;
-    fop->addr_type = ADDR_TYPE_ICAO;    // was ADDR_TYPE_FANET
+    fop->addr_type = ADDR_TYPE_FLARM;    // i.e., device - was ADDR_TYPE_FANET
     fop->timestamp = this_aircraft->timestamp;
     fop->gnsstime_ms = millis();
 

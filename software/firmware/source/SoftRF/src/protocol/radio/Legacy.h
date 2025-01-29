@@ -49,8 +49,11 @@ enum
 	ADDR_TYPE_P3I,       /* not available in id_method settings field */
 	ADDR_TYPE_FANET,     /* not available in id_method settings field */
 	ADDR_TYPE_6,
-	ADDR_TYPE_7          /* added for air-relay */
+	ADDR_TYPE_7
 };
+
+#define ADDR_TYPE_OGN 3
+   // for OGNTP TX packet only - device ID is "ADDR_TYPE_FLARM" (2) elsewhere
 
 enum
 {

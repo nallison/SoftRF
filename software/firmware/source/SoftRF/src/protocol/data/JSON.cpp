@@ -831,8 +831,8 @@ void parseSettings(JsonObject root)
     eeprom_block.field.settings.nmea_g = nmea_g.as<bool>();
     JsonVariant nmea_p = root[key]["private"];
     eeprom_block.field.settings.nmea_p = nmea_p.as<bool>();
-    JsonVariant nmea_l = root[key]["legacy"];
-    eeprom_block.field.settings.nmea_l = nmea_l.as<bool>();
+    JsonVariant nmea_t = root[key]["traffic"];
+    eeprom_block.field.settings.nmea_t = nmea_t.as<bool>();
     JsonVariant nmea_s = root[key]["sensors"];
     eeprom_block.field.settings.nmea_s = nmea_s.as<bool>();
     JsonVariant nmea_out = root[key]["output"];

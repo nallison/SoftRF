@@ -91,11 +91,11 @@ typedef struct zonestruct {
 static zonestats_t zone_stats[1+MAXRSSI-MINRSSI];
 static int32_t stats_count = 0;
 
-// RSSI thresholds, with defaults:
-static uint8_t close_rssi  = 27;    // at 27-29 still do not report
-static uint8_t report_rssi = 30;    // at 30-31 report, but no alarm
-static uint8_t alarm1_rssi = 32;    // at 32-34 give alarm level "low"
-static uint8_t alarm2_rssi = 35;    // at 35+ give alarm level "important"
+// RSSI thresholds, with defaults:  (adjusted down by value of settings->mode_s)
+static uint8_t close_rssi  = 28;    // at 28-30 still do not report
+static uint8_t report_rssi = 31;    // at 31-32 report, but no alarm
+static uint8_t alarm1_rssi = 33;    // at 33-35 give alarm level "low"
+static uint8_t alarm2_rssi = 36;    // at 36+ give alarm level "important"
 
 static void zero_stats()
 {
@@ -171,8 +171,19 @@ static void set_zone_thresholds(bool force)
         farther += zone_stats[index].ignore + zone_stats[index].report;
         closer  += zone_stats[index].alarm1 + zone_stats[index].alarm2;
     }
-    if (closer < MINSAMPLE && (! force))
-        return;      // use the defaults (but continue to collect data)
+    if (closer < MINSAMPLE && (! force)) {
+        // use the defaults (but continue to collect data)
+        // adjust the defaults based on value of settings->mode_s:
+        uint8_t adj = settings->mode_s;
+        if (adj > 9)  adj = 9;
+        close_rssi  -= adj;
+        report_rssi -= adj;
+        alarm1_rssi -= adj;
+        alarm2_rssi -= adj;
+        Serial.print("Using default Mode-S RSSI thresholds with 'gain'=");
+        Serial.println(adj);
+        return;
+    }
     // - continue if accumulated at least 100 samples in under-1000m range
     if (closer > MAXSAMPLE || farther > 0x08000000)
         stats_count = -1;    // do not collect any more data
@@ -222,7 +233,7 @@ static void set_zone_thresholds(bool force)
     }
     close_rssi = report_rssi - 3;   // mark as 3000m distance, but not reported in PFLAA
 
-    Serial.print("RSSI thresholds: ");
+    Serial.print("Using auto-calibrated Mode-S RSSI thresholds: ");
     Serial.print(close_rssi);
     Serial.print(", ");
     Serial.print(report_rssi);
@@ -668,7 +679,7 @@ static void CPRRelative_setup()
     // for both odd and even, this value is conservative:
     dLatHalf = 0.5 * dLat[0];
     // first-cut range limit (along each axis):
-    if (settings->hrange1090 > 0)
+    if (settings->hrange1090 > 0 && settings->hrange1090 < 84)
       maxcprdiff = 200*(16+settings->hrange1090);   // 9nm pre-computation threshold + range
     else
       maxcprdiff = 20000;  // 100km
@@ -1311,8 +1322,6 @@ static bool parse_position(int index)
             }
             return false;
         }
-        // else, if DEBUG_DEEPER, then continue here
-        // - meaning a few targets 15nm-25nm away will be kept
     }
     if (fo1090.distance == 0) {
         fo1090.bearing = 0;
@@ -1414,6 +1423,7 @@ static bool parse_velocity(int i)
       // the following fields are absent from a groundspeed message type
       //heading_is_valid=0; heading=0; airspeed_type=0; airspeed=0;
 
+#if 0
     } else if (mm.sub == 3 || mm.sub == 4) {   // air speed (rare) (not processed here)
 
       //mm.heading_is_valid = ((msg[5] & 4) >> 2);
@@ -1430,6 +1440,7 @@ static bool parse_velocity(int i)
 
       // the following fields are absent from an airspeed message type
       //ewv=0; nsv=0; groundspeed=0; track=0; track_is_valid=0;
+#endif
     }
 
     //mm.vert_rate_source = (msg[8]&0x10) >> 4;   // 0=GNSS, 1=baro
@@ -1444,19 +1455,19 @@ static bool parse_velocity(int i)
     if (alt_diff_sign)  raw_alt_diff = -raw_alt_diff;  // GNSS altitude is below baro altitude
     cip->baro_alt_diff = (float)raw_alt_diff;
 
+    // keep an average estimate of baro alt diff as reported from nearby aircraft
+    static int8_t prev_count = 63;
     // if altitude is very different from ours then ignore baro_alt_diff
-    if (fabs(cip->altitude - ThisAircraft.altitude) > 2000)
-        return true;
-
-    // keep an average estimate of baro alt diff as reporterd from nearby aircraft
-    static uint32_t prev_addr = 0;
-    static int8_t prev_count = 127;
-    if (average_baro_alt_diff == 0) {
-        average_baro_alt_diff = cip->baro_alt_diff;
-    } else if (--prev_count <= 0 || fo1090.addr != prev_addr) {
-        average_baro_alt_diff = 0.8 * average_baro_alt_diff + 0.2 * cip->baro_alt_diff;
-        prev_addr = fo1090.addr;
-        prev_count = 127;
+    if (fabs(cip->altitude - ThisAircraft.altitude) < 2000) {
+        if (average_baro_alt_diff == 0) {
+            average_baro_alt_diff = cip->baro_alt_diff;
+        } else {
+            prev_count -= adsb_acfts;
+            if (--prev_count <= 0) {   // decrement by 2 if one aircraft, 3 if two, ...
+                prev_count = 63;
+                average_baro_alt_diff = 0.8 * average_baro_alt_diff + 0.2 * cip->baro_alt_diff;
+            }
+        }
     }
 
     return true;
@@ -1552,7 +1563,7 @@ Serial.println((int)(msg[0] & 7));
         static uint32_t lasttime = 0;
         uint32_t thistime = millis();
         if (thistime < lasttime + 300) {       // some aircraft send bursts of messages
-//if ((settings->debug_flags & DEBUG_DEEPER) != 0 && (settings->debug_flags & DEBUG_ALARM) == 0)
+//if ((settings->debug_flags & DEBUG_DEEPER) && ! (settings->debug_flags & DEBUG_ALARM))
 if ((settings->debug_flags & (DEBUG_DEEPER|DEBUG_ALARM)) == DEBUG_DEEPER)
 Serial.println("throttling Mode S message burst");
             return false;
@@ -1580,7 +1591,7 @@ Serial.println("throttling Mode S message burst");
             cip = &Container[index];
             // if the aircraft has recently sent ADS-B position, don't process Mode S
             if (cip->positiontime == OurTime) {
-//if ((settings->debug_flags & DEBUG_DEEPER) != 0 && (settings->debug_flags & DEBUG_ALARM) == 0)
+//if ((settings->debug_flags & DEBUG_DEEPER) && !(settings->debug_flags & DEBUG_ALARM))
 if ((settings->debug_flags & (DEBUG_DEEPER|DEBUG_ALARM)) == DEBUG_DEEPER)
 Serial.println("ignoring S - have recent P");
                 return false;

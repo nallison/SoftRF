@@ -897,8 +897,8 @@ void OLED_fini(int reason)
     {
 #if !defined(EXCLUDE_OLED_049)
     case DISPLAY_OLED_0_49:
-      u8x8->draw2x2String(5, 5, reason == SOFTRF_SHUTDOWN_LOWBAT ?
-                                "BAT" : "OFF");
+      u8x8->draw2x2String(5, 5, reason == SOFTRF_SHUTDOWN_LOWBAT ? "BAT"
+                              : reason == SOFTRF_SHUTDOWN_EXTPWR ? "EXT" : "OFF");
       delay(2000);
       u8x8->noDisplay();
       break;
@@ -907,8 +907,8 @@ void OLED_fini(int reason)
     case DISPLAY_OLED_HELTEC:
     case DISPLAY_OLED_1_3:
     default:
-      u8x8->draw2x2String(1, 3, reason == SOFTRF_SHUTDOWN_LOWBAT ?
-                                "LOW BAT" : "  OFF  ");
+      u8x8->draw2x2String(1, 3, reason == SOFTRF_SHUTDOWN_LOWBAT ? "LOW BAT"
+                              : reason == SOFTRF_SHUTDOWN_EXTPWR ? "EXT PWR" : "  OFF  ");
       break;
     }
   }

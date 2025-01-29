@@ -39,9 +39,8 @@
 #include "../../driver/Strobe.h"
 #endif
 #include "../../driver/Bluetooth.h"
-#if defined(USE_SD_CARD)
 #include "../../driver/Filesys.h"
-#endif
+#include "IGC.h"
 #include "../../TrafficHelper.h"
 
 #define ADDR_TO_HEX_STR(s, c) (s += ((c) < 0x10 ? "0" : "") + String((c), HEX))
@@ -124,10 +123,6 @@ static int WiFi_receive_TCP(char* RXbuffer, int RXbuffer_size)
             i++;
         }
         RXbuffer[i] = '\0';
-//if ((settings->nmea_d || settings->nmea2_d)  && (settings->debug_flags & DEBUG_DEEPER)) {
-//Serial.print("TCP>");
-//Serial.print(RXbuffer);
-//}
         return i;
     }
     client.stop();
@@ -136,7 +131,7 @@ static int WiFi_receive_TCP(char* RXbuffer, int RXbuffer_size)
 
 static void WiFi_flush_TCP()
 {
-static bool db;
+//static bool db;
 //db = ((settings->nmea_d || settings->nmea2_d) && (settings->debug_flags & DEBUG_DEEPER));
     if (client.connected())
     {
@@ -211,7 +206,7 @@ TinyGPSCustom C_Volume;
 TinyGPSCustom C_Pointer;
 TinyGPSCustom C_NMEA_gnss; /* 10 */
 TinyGPSCustom C_NMEA_private;
-TinyGPSCustom C_NMEA_legacy;
+TinyGPSCustom C_NMEA_traffic;
 TinyGPSCustom C_NMEA_sensors;
 TinyGPSCustom C_NMEA_Output;
 TinyGPSCustom C_GDL90_Output;
@@ -341,14 +336,6 @@ unsigned int NMEA_add_checksum(char *buf)
   return 0;
 }
 
-void sendPFLAJ()
-{
-    snprintf_P(NMEABuffer, sizeof(NMEABuffer), PSTR("$PFLAJ,A,%d,%d,0*"),
-                 ThisAircraft.airborne, ThisAircraft.airborne);
-    int nmealen = NMEA_add_checksum();
-    NMEA_Outs(settings->nmea_l, settings->nmea2_l, NMEABuffer, nmealen, false);
-}
-
 // send self-test and version sentences out, imitating a FLARM
 void sendPFLAV(bool nowait)
 {
@@ -363,23 +350,16 @@ void sendPFLAV(bool nowait)
           return;
   }
   uint32_t timebits = (((uint32_t) OurTime) & 0x60);
-  if (settings->nmea_l || settings->nmea2_l) {
-    if (nowait || timebits == 0x20) {
-      uint32_t pps = SoC->get_PPS_TimeMarker();
-      snprintf_P(NMEABuffer, sizeof(NMEABuffer), PSTR("$PFLAE,A,0,0%s*"),
-          (pps > 0 && millis()-pps < 2000)? ",PPS received" : "");
-      int nmealen = NMEA_add_checksum();
-      NMEA_Outs(settings->nmea_l, settings->nmea2_l, NMEABuffer, nmealen, false);
-    }
-    if (nowait || timebits == 0x60) {
-      snprintf_P(NMEABuffer, sizeof(NMEABuffer), PSTR("$PFLAV,A,2.4,7.24,%s-%s*"),
-                   SOFTRF_IDENT, SOFTRF_FIRMWARE_VERSION);  // our version in obstacle db text field
-      int nmealen = NMEA_add_checksum();
-      NMEA_Outs(settings->nmea_l, settings->nmea2_l, NMEABuffer, nmealen, false);
-    }
-//  if (nowait || timebits == 0x00 || timebits == 0x40) {    // every 64 seconds
-//      sendPFLAJ();
-//  }
+  if (nowait || timebits == 0x20) {
+    uint32_t pps = SoC->get_PPS_TimeMarker();
+    snprintf_P(NMEABuffer, sizeof(NMEABuffer), PSTR("$PFLAE,A,0,0%s*"),
+        (pps > 0 && millis()-pps < 2000)? ",PPS received" : "");
+    NMEAOutC(NMEA_T);
+  }
+  if (nowait || timebits == 0x60) {
+    snprintf_P(NMEABuffer, sizeof(NMEABuffer), PSTR("$PFLAV,A,2.4,7.24,%s-%s*"),
+                 SOFTRF_IDENT, SOFTRF_FIRMWARE_VERSION);  // our version in obstacle db text field
+    NMEAOutC(NMEA_T);
   }
 }
 
@@ -388,6 +368,13 @@ static bool is_a_prime_mk2 = false;
 static unsigned int UDP_NMEA_Output_Port = NMEA_UDP_PORT;
 bool has_serial2 = false;
 bool rx1090found = false;
+
+void sendPFLAJ()
+{
+    snprintf_P(NMEABuffer, sizeof(NMEABuffer), PSTR("$PFLAJ,A,%d,%d,%d*"),
+                 ThisAircraft.airborne, FlightLogOpen, rx1090found);
+    NMEAOutC(NMEA_T_PROJ);
+}
 
 void NMEA_setup()
 {
@@ -453,7 +440,7 @@ void NMEA_setup()
   C_Pointer.begin      (gnss, psrf_c, term_num++);
   C_NMEA_gnss.begin    (gnss, psrf_c, term_num++); /* 10 */
   C_NMEA_private.begin (gnss, psrf_c, term_num++);
-  C_NMEA_legacy.begin  (gnss, psrf_c, term_num++);
+  C_NMEA_traffic.begin (gnss, psrf_c, term_num++);
   C_NMEA_sensors.begin (gnss, psrf_c, term_num++);
   C_NMEA_Output.begin  (gnss, psrf_c, term_num++);
   C_GDL90_Output.begin (gnss, psrf_c, term_num++);
@@ -697,16 +684,56 @@ if (NMEA_Source != DEST_NONE) {     // only external sources
   yield();
 }
 
-void NMEA_Outs(bool out1, bool out2, const char *buf, size_t size, bool nl) {
+void NMEA_Outs(uint16_t nmeatype, const char *buf, unsigned int size, bool nl)
+{
+    uint16_t genus  = (nmeatype & 0xFF00);
+    uint8_t species = (uint8_t)(nmeatype & 0x00FF);
+    if (species == 0)  species = NMEA_BASIC;   // = 1
+    bool out1 = false;
+    bool out2 = false;
+    switch (genus) {
+      case NMEA_G:
+        if ((settings->nmea_g)  & species)  out1 = true;
+        if ((settings->nmea2_g) & species)  out2 = true;
+        break;
+      case NMEA_T:
+        if ((settings->nmea_t)  & species)  out1 = true;
+        if ((settings->nmea2_t) & species)  out2 = true;
+        break;
+      case NMEA_S:
+        if ((settings->nmea_s)  & species)  out1 = true;
+        if ((settings->nmea2_s) & species)  out2 = true;
+        break;
+      case NMEA_E:
+        if ((settings->nmea_e)  & species)  out1 = true;
+        if ((settings->nmea2_e) & species)  out2 = true;
+        break;
+      case NMEA_D:
+        if ((settings->nmea_d)  & species)  out1 = true;
+        if ((settings->nmea2_d) & species)  out2 = true;
+        break;
+      case NMEA_P:
+        if ((settings->nmea_p)  & species)  out1 = true;
+        if ((settings->nmea2_p) & species)  out2 = true;
+        break;
+      default:
+        return;  // no output
+    }
     if (out1)
         NMEA_Out(settings->nmea_out,  buf, size, nl);
     if (out2)
         NMEA_Out(settings->nmea_out2, buf, size, nl);
 }
 
+void NMEAOutC(int nmeatype)
+{
+      unsigned int nmealen = NMEA_add_checksum();
+      NMEA_Outs(nmeatype, NMEABuffer, nmealen, false);
+}
+
 void NMEAOutD()
 {
-    NMEA_Outs(settings->nmea_d, settings->nmea2_d, NMEABuffer, strlen(NMEABuffer), false);
+    NMEA_Outs(NMEA_D_ALL, NMEABuffer, strlen(NMEABuffer), false);
 }
 
 bool NMEA_encode(const char *buf, const int len)
@@ -999,8 +1026,7 @@ void NMEA_loop()
 
   sendPFLAV(false);
 
-  if ((settings->nmea_s || settings->nmea2_s) && (baro_chip != NULL)
-      && ThisAircraft.pressure_altitude != 0.0 && isTimeToPGRMZ()) {
+  if (baro_chip != NULL && ThisAircraft.pressure_altitude != 0.0 && isTimeToPGRMZ()) {
 
     int altitude = constrain(
             (int) (ThisAircraft.pressure_altitude * _GPS_FEET_PER_METER),
@@ -1009,9 +1035,7 @@ void NMEA_loop()
     /* https://developer.garmin.com/downloads/legacy/uploads/2015/08/190-00684-00.pdf */
     snprintf_P(NMEABuffer, sizeof(NMEABuffer), PSTR("$PGRMZ,%d,f,%c*"),
                altitude, isValidGNSSFix() ? '3' : '1'); /* feet , 3D fix */
-
-    unsigned int nmealen = NMEA_add_checksum();
-    NMEA_Outs(settings->nmea_s, settings->nmea2_s, NMEABuffer, nmealen, false);
+    NMEAOutC(NMEA_S);
 
 #if 0
 // moved to baro_loop()
@@ -1024,9 +1048,7 @@ void NMEA_loop()
             (int) ((ThisAircraft.vs * 100) / (_GPS_FEET_PER_METER * 60)),  /* cm/s   */
             constrain((int) Baro_temperature(), -99, 98),                  /* deg. C */
             str_Vcc);
-
-    nmealen = NMEA_add_checksum();
-    NMEA_Outs(settings->nmea_s, settings->nmea2_s, NMEABuffer, nmealen, false);
+    NMEAOutC(NMEA_S_LK8);
 
 #endif /* EXCLUDE_LK8EX1 */
 #endif
@@ -1035,7 +1057,7 @@ void NMEA_loop()
   }
 
 #if defined(ENABLE_AHRS)
-  if ((settings->nmea_s  || settings->nmea2_s) && isTimeToRPYL()) {
+  if (((settings->nmea_s  | settings->nmea2_s) & NMEA_S_AHRS) && isTimeToRPYL()) {
 
     AHRS_NMEA();
 
@@ -1120,29 +1142,25 @@ void NMEA_Export()
     if (++beatcount >= 10) {
       beatcount = 0;
       unsigned int nmealen;
-      if (settings->nmea_l || settings->nmea2_l) {
-          int nacft = Traffic_Count();   // maxrssi and adsb_acfts are byproducts
-          snprintf_P(NMEABuffer, sizeof(NMEABuffer),
-                  PSTR("$PSRFH,%06X,%d,%d,%d,%d,%d,%d,%d,%d*"),
-                  ThisAircraft.addr, settings->rf_protocol,
-                  millis(), (int)(voltage*100), SoC->getFreeHeap(),
-                  rx_packets_counter, tx_packets_counter, nacft, maxrssi);
-          nmealen = NMEA_add_checksum();
-          NMEA_Outs(settings->nmea_l, settings->nmea2_l, NMEABuffer, nmealen, false);
-      }
+      int nacft = Traffic_Count();   // maxrssi and adsb_acfts are byproducts
+      snprintf_P(NMEABuffer, sizeof(NMEABuffer),
+              PSTR("$PSRFH,%06X,%d,%d,%d,%d,%d,%d,%d,%d*"),
+              ThisAircraft.addr, settings->rf_protocol,
+              millis(), (int)(voltage*100), SoC->getFreeHeap(),
+              rx_packets_counter, tx_packets_counter, nacft, maxrssi);
+      NMEAOutC(NMEA_T);
       // also output an LK8EX1 sentence here if not sent from baro_loop()
       // - just to report the battery charge percentage
       // - LK8000 specs say to send percent instead of volts send as an integer, percent+1000
-      if ((settings->nmea_s || settings->nmea2_s) && (baro_chip == NULL)) {
+      if (baro_chip == NULL) {
           snprintf_P(NMEABuffer, sizeof(NMEABuffer), PSTR("$LK8EX1,999999,99999,9999,99,%d*"),
               1000+(int)Battery_charge());
-          nmealen = NMEA_add_checksum();
-          NMEA_Outs(settings->nmea_s, settings->nmea2_s, NMEABuffer, nmealen, false);
+          NMEAOutC(NMEA_S_LK8);
       }
     }
 #endif /* EXCLUDE_SOFTRF_HEARTBEAT */
 
-    if (! settings->nmea_l && ! settings->nmea2_l)
+    if (! (settings->nmea_t || settings->nmea2_t))
          return;
 
     container_t *cip, *fop;
@@ -1362,13 +1380,22 @@ void NMEA_Export()
          // convert tx_type to the code used by FLARM:
          int data_source = data_source_code[fop->tx_type];
 
-#if 1
          /*
           * When callsign is available - send it to a NMEA client.
           * If it is not - generate a callsign substitute,
           * based upon a protocol ID and the ICAO address
           */
-         if (fop->callsign[0] == '\0') {
+
+         if (settings->pflaa_cs == false) {         // skip the callsign
+
+           snprintf_P(NMEABuffer, sizeof(NMEABuffer),
+              PSTR("$PFLAA,%d,%d,%s,%d,%d,%06X,%s,,%s,%s,%X,%d,%d,%d" PFLAA_EXT1_FMT "*"),
+              alarm_level, dy, str_dx,
+              alt_diff, addr_type, id,
+              ltrim(str_course), ltrim(str_speed), ltrim(str_climb_rate), fop->aircraft_type,
+              (fop->no_track? 1 : 0), data_source, fop->rssi  PFLAA_EXT1_ARGS );
+
+         } else if (fop->callsign[0] == '\0') {     // no callsign, substitute ID
 
            snprintf_P(NMEABuffer, sizeof(NMEABuffer),
 //            PSTR("$PFLAA,%d,%d,%s,%d,%d,%06X!%s_%06X,%d,,%d,%s,%d,%d,%d,%d" PFLAA_EXT1_FMT "*"),
@@ -1391,17 +1418,8 @@ void NMEA_Export()
               ltrim(str_course), ltrim(str_speed), ltrim(str_climb_rate), fop->aircraft_type,
               (fop->no_track? 1 : 0), data_source, fop->rssi  PFLAA_EXT1_ARGS );
          }
-#else
-         // skip the callsign
-         snprintf_P(NMEABuffer, sizeof(NMEABuffer),
-            PSTR("$PFLAA,%d,%d,%s,%d,%d,%06X,%s,,%s,%s,%X" PFLAA_EXT1_FMT "*"),
-            alarm_level, dy, str_dx,
-            alt_diff, addr_type, id,
-            ltrim(str_course), ltrim(str_speed), ltrim(str_climb_rate), fop->aircraft_type,
-            (fop->no_track? 1 : 0), data_source, fop->rssi  PFLAA_EXT1_ARGS );
-#endif
-         unsigned int nmealen = NMEA_add_checksum();
-         NMEA_Outs(settings->nmea_l, settings->nmea2_l, NMEABuffer, nmealen, false);
+
+         NMEAOutC(NMEA_T);
 
         //}  /* done skipping the HP object */
 
@@ -1489,8 +1507,7 @@ void NMEA_Export()
                 PFLAU_EXT1_ARGS );
     }
 
-    unsigned int nmealen = NMEA_add_checksum();
-    NMEA_Outs(settings->nmea_l, settings->nmea2_l, NMEABuffer, nmealen, false);
+    NMEAOutC(NMEA_T);
 
 //#if defined(USE_SD_CARD)
 #if 0
@@ -1578,18 +1595,18 @@ void NMEA_Position()    // only called in txrx_test() mode (and maybe from RPi)
 #endif
 
     size_t gen_sz = nmeaSentenceFromInfo(&nmealib_buf, &info, (NmeaSentence)
-      (NMEALIB_SENTENCE_GPGGA | NMEALIB_SENTENCE_GPGSA | NMEALIB_SENTENCE_GPRMC));
+      (NMEALIB_SENTENCE_GPGGA | NMEALIB_SENTENCE_GPRMC));
+   // (NMEALIB_SENTENCE_GPGGA | NMEALIB_SENTENCE_GPGSA | NMEALIB_SENTENCE_GPRMC));
 
-    if (gen_sz) {
-      NMEA_Outs(settings->nmea_g, settings->nmea2_g, nmealib_buf.buffer, gen_sz, false);
-    }
+    if (gen_sz)
+      NMEA_Outs(NMEA_G, nmealib_buf.buffer, gen_sz, false);
   }
 }
 
 void NMEA_GGA()
 {
-  if (! settings->nmea_g && ! settings->nmea2_g)
-    return;
+  //if (! (settings->nmea_g || settings->nmea2_g))
+  //  return;
 
   NmeaInfo info;
 
@@ -1637,7 +1654,7 @@ void NMEA_GGA()
   if (gen_sz) {
     //strncpy(GPGGA_Copy, nmealib_buf.buffer, gen_sz);  // for traffic alarm logging
     //GPGGA_Copy[gen_sz] = '\0';
-    NMEA_Outs(settings->nmea_g, settings->nmea2_g, nmealib_buf.buffer, gen_sz, false);
+    NMEA_Outs(NMEA_G, nmealib_buf.buffer, gen_sz, false);
   }
 }
 #endif /* USE_NMEALIB */
@@ -1711,9 +1728,10 @@ void tryupdate(TinyGPSCustom &field, int idx)
     char *v  = stgdesc[idx].value;
     int32_t cur_val, cfg_val;
     switch (t) {
+    case STG_HIDDEN:
     case STG_INT1:
     case STG_UINT1:
-       cur_val = (t==STG_INT1? (*(int8_t*)v) : (*(uint8_t*)v));
+       cur_val = (t==STG_UINT1? (*(uint8_t*)v) : (*(int8_t*)v));
        cfg_val = cur_val;
        if (isdecdigit(p))
            cfg_val = atoi(p);
@@ -1722,10 +1740,10 @@ void tryupdate(TinyGPSCustom &field, int idx)
        if (cfg_val != cur_val) {
            msg = "changed to";
            cfg_is_updated = true;
-           if (t==STG_INT1)
-               *(int8_t *)v = (int8_t) cfg_val;
-           else
+           if (t==STG_UINT1)
                *(uint8_t *)v = (uint8_t) cfg_val;
+           else
+               *(int8_t *)v = (int8_t) cfg_val;
        }
        break;
     case STG_HEX2:
@@ -1756,9 +1774,9 @@ void tryupdate(TinyGPSCustom &field, int idx)
        }
        break;
     }
-    if (t==STG_INT1 || t==STG_INT1) {
+    if (t==STG_INT1 || t==STG_UINT1 || t==STG_HIDDEN) {
       snprintf_P(NMEABuffer, sizeof(NMEABuffer),
-        PSTR("%s %s %d\r\n"), label, msg, cfg_val);
+        PSTR("%s %s %d\r\n"), label, msg, (int) cfg_val);
     } else if (t==STG_HEX2 || t==STG_HEX6) {
       snprintf_P(NMEABuffer, sizeof(NMEABuffer),
         PSTR("%s %s %X\r\n"), label, msg, cfg_val);
@@ -1819,7 +1837,7 @@ void NMEA_Process_SRF_SKV_Sentences()
             PSRFX_VERSION,      settings->mode,      settings->rf_protocol,
             settings->band,     settings->acft_type, settings->alarm,
             settings->txpower,  settings->volume,    settings->pointer,
-            settings->nmea_g,   settings->nmea_p,    settings->nmea_l,
+            settings->nmea_g,   settings->nmea_p,    settings->nmea_t,
             settings->nmea_s,   settings->nmea_out,  settings->gdl90,
             settings->d1090,    settings->stealth,   settings->no_track,
             settings->power_save );
@@ -1840,7 +1858,7 @@ void NMEA_Process_SRF_SKV_Sentences()
           tryupdate(C_Pointer, STG_POINTER);
           tryupdate(C_NMEA_gnss, STG_NMEA_G);
           tryupdate(C_NMEA_private, STG_NMEA_P);
-          tryupdate(C_NMEA_legacy, STG_NMEA_L);
+          tryupdate(C_NMEA_traffic, STG_NMEA_T);
           tryupdate(C_NMEA_sensors, STG_NMEA_S);
           tryupdate(C_NMEA_Output, STG_NMEA_OUT);
           tryupdate(C_GDL90_Output, STG_GDL90);
@@ -1868,7 +1886,7 @@ void NMEA_Process_SRF_SKV_Sentences()
             settings->ignore_id,   settings->follow_id,  settings->baud_rate,
             settings->power_ext,   settings->nmea_d,     settings->debug_flags,
             settings->nmea_out2,   settings->nmea2_g,    settings->nmea2_p,
-            settings->nmea2_l,     settings->nmea2_s,    settings->nmea2_d,
+            settings->nmea2_t,     settings->nmea2_s,    settings->nmea2_d,
             settings->relay,       settings->bluetooth,  settings->baudrate2,
             settings->invert2,     settings->nmea_e,     settings->nmea2_e,
             settings->altpin0,     settings->voice,      settings->strobe);
@@ -1888,7 +1906,7 @@ void NMEA_Process_SRF_SKV_Sentences()
               settings->nmea_out2 = DEST_NONE;
           tryupdate(D_NMEA2_gnss, STG_NMEA_G);
           tryupdate(D_NMEA2_private, STG_NMEA_P);
-          tryupdate(D_NMEA2_legacy, STG_NMEA_L);
+          tryupdate(D_NMEA2_legacy, STG_NMEA_T);
           tryupdate(D_NMEA2_sensors, STG_NMEA_S);
           tryupdate(D_NMEA2_debug, STG_NMEA_D);
           tryupdate(D_relay, STG_RELAY);
@@ -1940,18 +1958,17 @@ void NMEA_Process_SRF_SKV_Sentences()
           tryupdate(F_tcpport, STG_TCPPORT);
           tryupdate(F_geoid, STG_GEOID);
           tryupdate(F_freq_corr, STG_RFC);
+          tryupdate(F_logflight, STG_LOGFLIGHT);
+          tryupdate(F_loginterval, STG_LOGINTERVAL);
+          tryupdate(F_logalarms, STG_ALARMLOG);
 #if defined(ESP32)
           tryupdate(F_rx1090, STG_RX1090);
           tryupdate(F_rx1090x, STG_RX1090X);
           tryupdate(F_mode_s, STG_MODE_S);
           tryupdate(F_gnss_pins, STG_GNSS_PINS);
           tryupdate(F_ppswire, STG_PPSWIRE);
-          tryupdate(F_logalarms, STG_ALARMLOG);
           tryupdate(F_sd_card, STG_SD_CARD);
-          tryupdate(F_logflight, STG_LOGFLIGHT);
-          tryupdate(F_loginterval, STG_LOGINTERVAL);
 #endif
-
           if (cfg_is_updated && atoi(F_Version.value()))
               nmea_cfg_restart(true);
           else
@@ -1996,6 +2013,8 @@ void NMEA_Process_SRF_SKV_Sentences()
         if (! query) {
             if (stgdesc[i].type == STG_UINT1)
                 cfg_is_updated = (*((uint8_t *)(stgdesc[i].value)) != atoi(S_value.value()));
+            else if (stgdesc[i].type == STG_INT1 || stgdesc[i].type == STG_HIDDEN)
+                cfg_is_updated = (*((int8_t *)(stgdesc[i].value)) != atoi(S_value.value()));
             if (cfg_is_updated)
                 loaded = load_setting(i, S_value.value());
         }
@@ -2118,7 +2137,7 @@ void NMEA_Process_SRF_SKV_Sentences()
 
       if (strncmp(V_Version.value(), "?", 1) == 0) {
 
-#if defined(ABANDON_EEPROM)
+#if 1 // defined(ABANDON_EEPROM)
           snprintf_P(NMEABuffer, sizeof(NMEABuffer),
             PSTR("$PSKVC,%d,%d,%d,%d,%d,%d,%d,%d,%d,%X*"),
             PSKVC_VERSION,       settings->units,       settings->zoom,
@@ -2138,7 +2157,7 @@ void NMEA_Process_SRF_SKV_Sentences()
 #endif
           nmea_cfg_reply();
 
-#if defined(ABANDON_EEPROM)
+#if 1  // defined(ABANDON_EEPROM)
 
       } else if (isdecdigit(V_Version.value())) {
 

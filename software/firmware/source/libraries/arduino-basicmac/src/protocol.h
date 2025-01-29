@@ -28,7 +28,8 @@ enum
 	RF_PROTOCOL_ADSB_UAT,  /* ADS-B UAT */
 	RF_PROTOCOL_FANET,     /* Skytraxx */
 	RF_PROTOCOL_GDL90,     /* from external device */
-	RF_PROTOCOL_LATEST     /* new 2024 protocol */
+	RF_PROTOCOL_LATEST,    /* new 2024 protocol */
+	RF_PROTOCOL_NONE = 255
 };
 
 enum

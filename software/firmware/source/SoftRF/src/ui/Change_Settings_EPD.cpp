@@ -87,7 +87,7 @@ set_entry regions[] = {
 };
 
 set_entry alarms[] = {
-  {TRAFFIC_ALARM_LEGACY,   "Legacy"},
+  {TRAFFIC_ALARM_LATEST,   "Latest"},
   {TRAFFIC_ALARM_VECTOR,   "Vector"},
   {TRAFFIC_ALARM_DISTANCE, "Distance"},
   {TRAFFIC_ALARM_NONE,     "None"},

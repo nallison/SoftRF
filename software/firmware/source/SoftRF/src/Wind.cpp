@@ -575,7 +575,7 @@ void this_airborne()
     ThisAircraft.airborne = (airborne > 0)? 1 : 0;
 
     if (airborne_changed) {
-      if (settings->nmea_l || settings->nmea2_l)
+      if (settings->nmea_t || settings->nmea2_t)
         sendPFLAJ();
     }
 
@@ -1000,7 +1000,7 @@ void project_that(container_t *fop)
 
       /* Turn rate was obtained in Legacy_decode() */
       /* For vector alarm method don't need more than that */
-      //if (settings->alarm != TRAFFIC_ALARM_LEGACY)
+      //if (settings->alarm != TRAFFIC_ALARM_LATEST)
       //      return;
 
       /* Incoming Legacy packets provide us with the velocity data.       */
@@ -1118,7 +1118,7 @@ To compute the correct air-reference circling path:
 
       fop->turnrate = 0.0;
 
-      //if (settings->alarm != TRAFFIC_ALARM_LEGACY)  // don't need more than the turn rate
+      //if (settings->alarm != TRAFFIC_ALARM_LATEST)  // don't need more than the turn rate
       //    return;
 
       gspeed = fop->speed * (4.0 * _GPS_MPS_PER_KNOT);   // quarter-meters per sec
@@ -1190,7 +1190,7 @@ To compute the correct air-reference circling path:
        fop->turnrate = aturnrate;   // (stores air ref turnrate in the gnd ref field)
     }
 
-    //if (settings->alarm != TRAFFIC_ALARM_LEGACY)  // don't need more than the turn rate
+    //if (settings->alarm != TRAFFIC_ALARM_LATEST)  // don't need more than the turn rate
     //      return;
 
     /*  compute air-reference NS & EW speed components for future time points */

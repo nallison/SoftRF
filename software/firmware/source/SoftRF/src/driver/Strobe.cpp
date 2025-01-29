@@ -115,12 +115,8 @@ void Strobe_Start()
     //Serial.print("Strobe flash at alarm level: ");
     //Serial.println(alarm_level);
 
-    if (settings->nmea_l || settings->nmea2_l) {
-        snprintf_P(NMEABuffer, sizeof(NMEABuffer),
-          PSTR("$PSRSF,%d*"), NMEAlevel);
-        unsigned int nmealen = NMEA_add_checksum();
-        NMEA_Outs(settings->nmea_l, settings->nmea2_l, NMEABuffer, nmealen, false);
-    }
+    snprintf_P(NMEABuffer, sizeof(NMEABuffer), PSTR("$PSRSF,%d*"), NMEAlevel);
+    NMEAOutC(NMEA_E_OUTPUT);
 }
 
 void Strobe_Continue()
