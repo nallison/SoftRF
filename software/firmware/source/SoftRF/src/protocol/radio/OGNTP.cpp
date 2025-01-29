@@ -25,7 +25,9 @@
 
 #include "../../../SoftRF.h"
 #include "../../driver/RF.h"
+#include "../../driver/GNSS.h"
 #include "../../driver/Settings.h"
+#include "Legacy.h"
 
 const rf_proto_desc_t ogntp_proto_desc = {
   "OGNTP",
@@ -98,10 +100,10 @@ bool ogntp_decode(void *pkt, container_t *this_aircraft, ufo_t *fop) {
   }
 
 #if !defined(SOFTRF_ADDRESS)
-  uint8_t addr_type = ADDR_TYPE_ANONYMOUS;
+  uint8_t addr_type = ADDR_TYPE_OGN;
 #else
   uint8_t addr_type = (this_aircraft->addr == SOFTRF_ADDRESS ?
-                        ADDR_TYPE_ICAO : ADDR_TYPE_ANONYMOUS);
+                        ADDR_TYPE_ICAO : ADDR_TYPE_OGN);
 #endif
 
   /* ignore this device own (relayed) packets */
@@ -127,7 +129,8 @@ bool ogntp_decode(void *pkt, container_t *this_aircraft, ufo_t *fop) {
   if (fop->addr == ThisAircraft.addr)
          return true;                  /* same ID as this aircraft - ignore */
 
-  fop->addr_type = ogn_rx_pkt.Packet.Header.AddrType;
+  fop->addr_type =
+      (ogn_rx_pkt.Packet.Header.AddrType == ADDR_TYPE_ICAO ? ADDR_TYPE_ICAO : ADDR_TYPE_FLARM);
   fop->timestamp = this_aircraft->timestamp;
   fop->gnsstime_ms = millis();
 
@@ -161,6 +164,13 @@ size_t ogntp_encode(void *pkt, container_t *this_aircraft) {
   pos.Altitude  = (int32_t) ((this_aircraft->altitude - this_aircraft->geoid_separation) * 10);  // ellipsoid -> MSL
 
   uint8_t aircraft_type = this_aircraft->aircraft_type;
+  if (this_aircraft != &ThisAircraft
+    && (this_aircraft->protocol == RF_PROTOCOL_LATEST || this_aircraft->protocol == RF_PROTOCOL_LEGACY)
+    && this_aircraft->airborne==0
+    && aircraft_type == AIRCRAFT_TYPE_UNKNOWN) {    // relaying landed-out traffic
+        // && aircraft->landed_out)
+      //aircraft_type = AIRCRAFT_TYPE_GLIDER;       // leave as "unknown" to signal landed-out
+  }
   if (aircraft_type == AIRCRAFT_TYPE_WINCH) {
       aircraft_type = AIRCRAFT_TYPE_STATIC;
       pos.ClimbRate = 0;
@@ -176,14 +186,20 @@ size_t ogntp_encode(void *pkt, container_t *this_aircraft) {
 
   pos.Heading = (int16_t) (this_aircraft->course * 10);
   pos.Speed   = (int16_t) (this_aircraft->speed * 10 * _GPS_MPS_PER_KNOT);
-  pos.HDOP    = (uint8_t) (this_aircraft->hdop / 10);
+  pos.HDOP    = (uint8_t) (ThisAircraft.hdop / 10);   // not this_aircraft-> since no hdop for Legacy
 
   pos.Encode(ogn_tx_pkt.Packet);
 
   ogn_tx_pkt.Packet.HeaderWord      = 0;
 
   ogn_tx_pkt.Packet.Header.Address  = this_aircraft->addr;
-  ogn_tx_pkt.Packet.Header.AddrType = settings->id_method;
+
+  if (settings->id_method == ADDR_TYPE_ICAO)
+      ogn_tx_pkt.Packet.Header.AddrType = ADDR_TYPE_ICAO;
+  else if (settings->rf_protocol == RF_PROTOCOL_OGNTP)
+      ogn_tx_pkt.Packet.Header.AddrType = ADDR_TYPE_OGN;  
+  else   // altprotocol
+      ogn_tx_pkt.Packet.Header.AddrType = ADDR_TYPE_FLARM;  
 
 #if defined(USE_OGN_ENCRYPTION)
   if (key[0] || key[1] || key[2] || key[3])
@@ -196,7 +212,13 @@ size_t ogntp_encode(void *pkt, container_t *this_aircraft) {
 
   ogn_tx_pkt.Packet.Position.AcftType = (int16_t) aircraft_type;
   ogn_tx_pkt.Packet.Position.Stealth  = (int16_t) this_aircraft->stealth;
-  ogn_tx_pkt.Packet.Position.Time     = this_aircraft->timestamp;   // second();
+  int second = gnss.time.second();
+  if (leap_seconds_correction != 0) {
+      second -= (int) leap_seconds_correction;
+      if (second < 0)   second += 60;
+      if (second > 59)  second -= 60;
+  }
+  ogn_tx_pkt.Packet.Position.Time     = (unsigned) second;   // second();
 
 #if defined(USE_OGN_ENCRYPTION)
   if (ogn_tx_pkt.Packet.Header.Encrypted)
