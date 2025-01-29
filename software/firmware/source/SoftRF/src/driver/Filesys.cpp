@@ -193,29 +193,29 @@ void Filesys_setup() {
   if (! SD.exists("/logs/old"))
       SD.mkdir("/logs/old");
 
-  // if the existing log.txt is above a certain size
+  // if the existing sdlog.txt is above a certain size
   // then keep a copy and start a new one
   size_t logsize = 0;
-  SDfile = SD.open("/logs/log.txt", FILE_READ);
+  SDfile = SD.open("/logs/sdlog.txt", FILE_READ);
   if (SDfile) {
       logsize = SDfile.size();
       SDfile.close();
   }
   if (logsize > 200000) {
       SD.remove("/logs/oldlog.txt");
-      SD.rename("/logs/log.txt", "/logs/oldlog.txt");
+      SD.rename("/logs/sdlog.txt", "/logs/oldlog.txt");
       logsize = 0;
   }
   if (logsize > 0) {
-      SDfile = SD.open("/logs/log.txt", FILE_APPEND);
+      SDfile = SD.open("/logs/sdlog.txt", FILE_APPEND);
       SDfile.print("---booted---\r\n");
   } else {
-      SDfile = SD.open("/logs/log.txt", FILE_WRITE);
+      SDfile = SD.open("/logs/sdlog.txt", FILE_WRITE);
   }
   if (SDfile)
       SDlogOpen = true;
   else
-      Serial.println("Failed to open SD/logs/log.txt for writing");
+      Serial.println("Failed to open SD/logs/sdlog.txt for writing");
 
   if (settings->debug_flags & DEBUG_SIMULATE) {
       // try to open file with simulated GNSS sentences
@@ -250,9 +250,9 @@ void SD_log(const char * message)
   if (SDlogOpen) {
     bool success = SDfile.print(message);
     if (success) {
-        Serial.println("- Message appended to SD log.txt");
+        Serial.println("- Message appended to sdlog.txt");
     } else {
-        Serial.println("- Append to SD log.txt failed");
+        Serial.println("- Append to sdlog.txt failed");
     }
     yield();
   }
