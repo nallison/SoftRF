@@ -23,6 +23,7 @@
 #include "RF.h"
 #include "../system/Time.h"
 #include "../system/SoC.h"
+#include "../TrafficHelper.h"
 #include "Settings.h"
 #include "Battery.h"
 #include "../ui/Web.h"
@@ -40,7 +41,7 @@ byte RxBuffer[MAX_PKT_SIZE] __attribute__((aligned(sizeof(uint32_t))));
 time_t RF_time;
 uint8_t RF_current_slot = 0;
 uint8_t RF_current_chan = 0;
-
+uint32_t RF_OK_until  = 0;
 uint32_t TxTimeMarker = 0;
 uint32_t TxEndMarker  = 0;
 byte TxBuffer[MAX_PKT_SIZE] __attribute__((aligned(sizeof(uint32_t))));
@@ -51,6 +52,8 @@ uint32_t rx_packets_counter = 0;
 int8_t which_rx_try = 0;
 int8_t RF_last_rssi = 0;
 uint16_t RF_last_crc = 0;
+
+uint8_t current_RF_protocol;    // for tx - rx is always in settings->rf_protocol
 
 FreqPlan RF_FreqPlan;
 static bool RF_ready = false;
@@ -72,12 +75,15 @@ const char *Protocol_ID[] = {
 };
 
 size_t (*protocol_encode)(void *, container_t *);
+size_t (*altprotocol_encode)(void *, container_t *);
 bool   (*protocol_decode)(void *, container_t *, ufo_t *);
 
 static Slots_descr_t Time_Slots, *ts;
 static uint8_t       RF_timing = RF_TIMING_INTERVAL;
 
 extern const gnss_chip_ops_t *gnss_chip;
+
+#define RF_CHANNEL_NONE 0xFF
 
 static bool nrf905_probe(void);
 static void nrf905_setup(void);
@@ -219,476 +225,6 @@ uint8_t parity(uint32_t x) {
     // return (parity % 2);
     return (parity & 0x01);
 }
- 
-byte RF_setup(void)
-{
-
-  if (rf_chip == NULL) {
-#if !defined(USE_OGN_RF_DRIVER)
-#if !defined(EXCLUDE_SX12XX)
-#if !defined(EXCLUDE_SX1276)
-    if (sx1276_ops.probe()) {
-      rf_chip = &sx1276_ops;
-#else
-    if (false) {
-#endif
-#if defined(USE_BASICMAC)
-#if !defined(EXCLUDE_SX1276)
-      SX12XX_LL = &sx127x_ll_ops;
-#endif
-    } else if (sx1262_ops.probe()) {
-      rf_chip = &sx1262_ops;
-      SX12XX_LL = &sx126x_ll_ops;
-#endif /* USE_BASICMAC */
-#else
-    if (false) {
-#endif /* EXCLUDE_SX12XX */
-#if !defined(EXCLUDE_NRF905)
-    } else if (nrf905_ops.probe()) {
-      rf_chip = &nrf905_ops;
-#endif /* EXCLUDE_NRF905 */
-#if !defined(EXCLUDE_UATM)
-    } else if (uatm_ops.probe()) {
-      rf_chip = &uatm_ops;
-#endif /* EXCLUDE_UATM */
-#if !defined(EXCLUDE_CC13XX)
-    } else if (cc13xx_ops.probe()) {
-      rf_chip = &cc13xx_ops;
-#endif /* EXCLUDE_CC13XX */
-    }
-    if (rf_chip && rf_chip->name) {
-      Serial.print(rf_chip->name);
-      Serial.println(F(" RFIC is detected."));
-    } else {
-      Serial.println(F("WARNING! None of supported RFICs is detected!"));
-    }
-#else /* USE_OGN_RF_DRIVER */
-    if (ognrf_ops.probe()) {
-      rf_chip = &ognrf_ops;
-      Serial.println(F("OGN_DRV: RFIC is detected."));
-    } else {
-      Serial.println(F("WARNING! RFIC is NOT detected."));
-    }
-#endif /* USE_OGN_RF_DRIVER */
-  }
-
-  /* "AUTO" and "UK" freqs now mapped to EU */
-  if (settings->band == RF_BAND_AUTO)
-      settings->band == RF_BAND_EU;
-  if (settings->band == RF_BAND_UK)
-      settings->band == RF_BAND_EU;
-  /* Supersede EU plan with UK when PAW is selected */
-    if (rf_chip                &&
-#if !defined(EXCLUDE_NRF905)
-        rf_chip != &nrf905_ops &&
-#endif
-        settings->band == RF_BAND_EU
-            && settings->rf_protocol == RF_PROTOCOL_P3I)
-      settings->band == RF_BAND_UK;
-
-  RF_FreqPlan.setPlan(settings->band, settings->rf_protocol);
-
-  if (rf_chip) {
-    rf_chip->setup();
-
-    const rf_proto_desc_t *p;
-
-    switch (settings->rf_protocol)
-    {
-      case RF_PROTOCOL_OGNTP:     p = &ogntp_proto_desc;  break;
-      case RF_PROTOCOL_P3I:       p = &p3i_proto_desc;    break;
-      case RF_PROTOCOL_FANET:     p = &fanet_proto_desc;  break;
-#if !defined(EXCLUDE_UAT978)
-      case RF_PROTOCOL_ADSB_UAT:  p = &uat978_proto_desc; break;
-#endif
-      case RF_PROTOCOL_LEGACY:
-      case RF_PROTOCOL_LATEST:
-      default:                    p = &legacy_proto_desc; break;
-    }
-
-    RF_timing         = p->tm_type;
-
-    ts                = &Time_Slots;
-    ts->air_time      = p->air_time;
-    ts->interval_min  = p->tx_interval_min;
-    ts->interval_max  = p->tx_interval_max;
-    ts->interval_mid  = (p->tx_interval_max + p->tx_interval_min) / 2;
-    ts->s0.begin      = p->slot0.begin;
-    ts->s1.begin      = p->slot1.begin;
-    ts->s0.duration   = p->slot0.end - p->slot0.begin;
-    ts->s1.duration   = p->slot1.end - p->slot1.begin;
-
-    uint16_t duration = ts->s0.duration + ts->s1.duration;
-    ts->adj = duration > ts->interval_mid ? 0 : (ts->interval_mid - duration) / 2;
-
-    return rf_chip->type;
-  } else {
-    return RF_IC_NONE;
-  }
-}
-
-
-/* original code, now only called for protocols other than Legacy: */
-void RF_SetChannel(void)
-{
-  tmElements_t  tm;
-  time_t        Time;
-  uint8_t       Slot;
-  uint32_t now_ms, pps_btime_ms, time_corr_neg;
-
-  switch (settings->mode)
-  {
-  case SOFTRF_MODE_TXRX_TEST:
-    Time = now();
-    RF_timing = RF_timing == RF_TIMING_2SLOTS_PPS_SYNC ?
-                RF_TIMING_INTERVAL : RF_timing;
-    break;
-#if !defined(EXCLUDE_MAVLINK)
-  case SOFTRF_MODE_UAV:
-    Time = the_aircraft.location.gps_time_stamp / 1000000;
-    RF_timing = RF_timing == RF_TIMING_2SLOTS_PPS_SYNC ?
-                RF_TIMING_INTERVAL : RF_timing;
-    break;
-#endif /* EXCLUDE_MAVLINK */
-
-  case SOFTRF_MODE_NORMAL:
-  default:
-
-    now_ms = millis();
-    pps_btime_ms = SoC->get_PPS_TimeMarker();
-
-    if (pps_btime_ms) {
-      if (now_ms > pps_btime_ms + 1010)
-        pps_btime_ms += 1000;
-      uint32_t last_Commit_Time = now_ms - gnss.time.age();
-      if (pps_btime_ms <= last_Commit_Time) {
-        time_corr_neg = (last_Commit_Time - pps_btime_ms) % 1000;
-      } else {
-        time_corr_neg = 1000 - ((pps_btime_ms - last_Commit_Time) % 1000);
-      }
-      ref_time_ms = pps_btime_ms;
-    } else {
-      uint32_t last_RMC_Commit = now_ms - gnss.date.age();
-      time_corr_neg = 100;
-      if (gnss_chip)
-          time_corr_neg = gnss_chip->rmc_ms;
-      ref_time_ms = last_RMC_Commit - time_corr_neg;
-    }
-
-    int yr    = gnss.date.year();
-    if( yr > 99)
-        yr    = yr - 1970;
-    else
-        yr    += 30;
-    tm.Year   = yr;
-    tm.Month  = gnss.date.month();
-    tm.Day    = gnss.date.day();
-    tm.Hour   = gnss.time.hour();
-    tm.Minute = gnss.time.minute();
-    tm.Second = gnss.time.second();
-
-//  Time = makeTime(tm) + (gnss.time.age() - time_corr_neg) / 1000;
-    Time = makeTime(tm) + (gnss.time.age() + time_corr_neg) / 1000;
-    OurTime = Time;
-
-    break;
-  }
-
-  switch (RF_timing)
-  {
-  case RF_TIMING_2SLOTS_PPS_SYNC:
-    if ((now_ms - ts->s0.tmarker) >= ts->interval_mid) {
-      ts->s0.tmarker = ref_time_ms + ts->s0.begin - ts->adj;
-      ts->current = 0;
-    }
-    if ((now_ms - ts->s1.tmarker) >= ts->interval_mid) {
-      ts->s1.tmarker = ref_time_ms + ts->s1.begin;
-      ts->current = 1;
-    }
-    Slot = ts->current;
-    break;
-  case RF_TIMING_INTERVAL:
-  default:
-    Slot = 0;
-    break;
-  }
-
-  uint8_t OGN = (settings->rf_protocol == RF_PROTOCOL_OGNTP ? 1 : 0);
-
-  uint8_t chan = RF_FreqPlan.getChannel(Time, Slot, OGN);
-
-#if DEBUG
-  int("Plan: "); Serial.println(RF_FreqPlan.Plan);
-  Serial.print("Slot: "); Serial.println(Slot);
-  Serial.print("OGN: "); Serial.println(OGN);
-  Serial.print("Channel: "); Serial.println(chan);
-#endif
-
-  if (RF_ready && rf_chip) {
-    rf_chip->channel(chan);
-  }
-}
-
-void RF_loop()
-{
-  if (!RF_ready) {
-    if (RF_FreqPlan.Plan == RF_BAND_AUTO) {
-      if (ThisAircraft.latitude || ThisAircraft.longitude) {
-        RF_FreqPlan.setPlan((int32_t)(ThisAircraft.latitude  * 600000),
-                            (int32_t)(ThisAircraft.longitude * 600000),
-                            settings->rf_protocol);
-        RF_ready = true;
-      }
-    } else {
-      RF_ready = true;
-    }
-  }
-
-  /* Experimental code by Moshe Braner, specific to Legacy Protocol */
-  /* More correct on frequency hopping & time slots, and uses less CPU time */
-  /* - requires OurTime to be set to UTC time in seconds - can do in Time_loop() */
-  /* - also needs time since PPS, it is stored in ref_time_ms */
-
-  if (settings->rf_protocol != RF_PROTOCOL_LEGACY
-   && settings->rf_protocol != RF_PROTOCOL_LATEST
-   && settings->rf_protocol != RF_PROTOCOL_OGNTP) {
-    RF_SetChannel();    /* use original code */
-    return;
-  }
-
-  if (ref_time_ms == 0)   /* no GNSS time yet */
-    return;
-
-  /* internal state variables to save CPU cycles */
-  static uint32_t RF_OK_until = 0;
-  //static uint8_t RF_current_slot = 0;  - now an external variable
-  // static uint8_t RF_current_chan = 0;  - now an external variable
-
-  uint32_t now_ms = millis();
-  if (now_ms < RF_OK_until) {   /* channel already computed */
-    if (rf_chip)
-      rf_chip->channel(RF_current_chan);
-    return;
-  }
-
-  RF_time = OurTime;      // may have been updated in Time_loop since last RF_loop
-
-  if (now_ms < ref_time_ms) {   /* should not happen */
-    --OurTime;
-    ref_time_ms -= 1000;
-    return;
-  }
-  uint32_t ms_since_pps = now_ms - ref_time_ms;
-  if (ms_since_pps >= 1300) {   // should not happen since Time_loop takes care of this
-    ++OurTime;
-    ref_time_ms += 1000;
-    return;
-  }
-
-  uint32_t slot_base_ms = ref_time_ms;
-  if (ms_since_pps < 300) {  /* does not happen often, since normally RF_OK_until 300 */
-    /* channel does _NOT_ change at PPS rollover in middle of slot 1 */
-    /* - therefore change reference second to the previous one: */
-    --RF_time;
-    slot_base_ms -= 1000;
-    ms_since_pps += 1000;
-  }
-
-  if (ms_since_pps >= 300 && ms_since_pps < 800) {
-
-    RF_current_slot = 0;
-    RF_OK_until = slot_base_ms + 800;
-    TxTimeMarker = slot_base_ms + 405 + SoC->random(0, 385);
-    TxEndMarker  = slot_base_ms + 795;
-
-  } else if (ms_since_pps >= 800 && ms_since_pps < 1300) {
-
-    RF_current_slot = 1;
-    /* channel does _NOT_ change at PPS rollover in middle of slot 1 */
-    RF_OK_until = slot_base_ms + 1300;
-    if ((RF_time & 0x0F) == 0xF) {
-        // some other receivers may mis-decrypt packets sent after the next PPS
-        // so squeeze the transmissions into the pre-PPS half of the slot
-        TxTimeMarker = slot_base_ms + 805 + SoC->random(0, 185);
-        TxEndMarker  = slot_base_ms + 995;
-    } else {
-        TxTimeMarker = slot_base_ms + 805 + SoC->random(0, 385);
-        TxEndMarker  = slot_base_ms + 1195;
-    }
-
-  } else { /* shouldn't happen */
-
-    RF_current_slot = 0;
-    RF_OK_until = ref_time_ms + 1300;
-    TxTimeMarker = RF_OK_until;  /* do not transmit for now */
-    TxEndMarker  = RF_OK_until;
-
-  }
-
-  uint8_t OGN = (settings->rf_protocol == RF_PROTOCOL_OGNTP ? 1 : 0);
-
-  RF_current_chan = RF_FreqPlan.getChannel((time_t)RF_time, RF_current_slot, OGN);
-
-  if (rf_chip)
-    rf_chip->channel(RF_current_chan);
-
-//Serial.printf("Chan %d, Slot %d at PPS+%d ms, tx ok %d - %d, gd to %d\r\n",
-//RF_current_chan, RF_current_slot, ms_since_pps, TxTimeMarker, TxEndMarker, RF_OK_until);
-}
-
-bool RF_Transmit_Ready()
-{
-    if (! TxEndMarker)  return true;   // for other protocols
-    uint32_t now_ms = millis();
-    return (now_ms >= TxTimeMarker && now_ms < TxEndMarker);
-}
-
-size_t RF_Encode(container_t *fop)
-{
-  size_t size = 0;
-  if (RF_ready && protocol_encode) {
-
-    if (settings->txpower == RF_TX_POWER_OFF ) {
-      return size;
-    }
-
-    /* Experimental code by Moshe Braner, specific to Legacy Protocol */
-    if (settings->rf_protocol == RF_PROTOCOL_LEGACY ||
-        settings->rf_protocol == RF_PROTOCOL_LATEST ||
-        settings->rf_protocol == RF_PROTOCOL_OGNTP) {
-      if (RF_Transmit_Ready()) {
-        size = (*protocol_encode)((void *) &TxBuffer[0], fop); 
-      }
-    } else {
-      if (millis() > TxTimeMarker) {
-        size = (*protocol_encode)((void *) &TxBuffer[0], fop);
-      }
-    }
-  }
-  return size;
-}
-
-bool RF_Transmit(size_t size, bool wait)
-{
-  if (RF_ready && rf_chip && (size > 0)) {
-
-    if (settings->txpower == RF_TX_POWER_OFF)
-      return true;
-
-    RF_tx_size = size;
-
-    /* Experimental code by Moshe Braner, specific to Legacy Protocol */
-    if (settings->rf_protocol == RF_PROTOCOL_LATEST
-     || settings->rf_protocol == RF_PROTOCOL_LEGACY
-     || settings->rf_protocol == RF_PROTOCOL_OGNTP) {
-      if (!wait || RF_Transmit_Ready()) {
-        rf_chip->transmit();
-        tx_packets_counter++;
-        RF_tx_size = 0;
-        TxTimeMarker = TxEndMarker;  /* do not transmit again until next slot */
-        /* do not set next transmit time here - it is done in RF_loop() */
-//Serial.println(">");
-//Serial.printf("> tx at %d s + %d ms\r\n", OurTime, millis()-ref_time_ms);
-#if 1
-if ((settings->debug_flags & (DEBUG_DEEPER | DEBUG_LEGACY)) == (DEBUG_DEEPER | DEBUG_LEGACY)) {
-uint32_t ms = millis();
-if (ms < ref_time_ms)  ms = 0;
-else   ms -= ref_time_ms;
-if (ms > 999)  ms = 999;
-Serial.printf("> tx %d s %3d ms (%02d:%02d) timebits %2d chan %2d\r\n",
-OurTime, ms, (int)gnss.time.minute(), (int)gnss.time.second(), (RF_time & 0x0F), RF_current_chan);
-}
-#endif
-        return true;
-      }
-
-//static int i = 0;
-//if (++i > 9) {
-//i = 0;
-//Serial.print("-");
-//}
-      return false;
-    }
-
-    /* original code for other protocols: */
-
-    if (!wait || millis() > TxTimeMarker) {
-
-      time_t timestamp = now();
-
-      rf_chip->transmit();
-
-      if (settings->nmea_p) {
-        StdOut.print(F("$PSRFO,"));
-        StdOut.print((uint32_t) timestamp);
-        StdOut.print(F(","));
-        StdOut.println(Bin2Hex((byte *) &TxBuffer[0],
-                               RF_Payload_Size(settings->rf_protocol)));
-      }
-      tx_packets_counter++;
-      RF_tx_size = 0;
-
-      Slot_descr_t *next;
-      uint32_t adj;
-
-      switch (RF_timing)
-      {
-      case RF_TIMING_2SLOTS_PPS_SYNC:
-        next = RF_FreqPlan.Channels == 1 ? &(ts->s0) :
-               ts->current          == 1 ? &(ts->s0) : &(ts->s1);
-        adj  = ts->current ? ts->adj   : 0;
-        TxTimeMarker = next->tmarker    +
-                       ts->interval_mid +
-                       SoC->random(adj, next->duration - ts->air_time);
-        break;
-      case RF_TIMING_INTERVAL:
-      default:
-        TxTimeMarker = millis() + SoC->random(ts->interval_min, ts->interval_max) - ts->air_time;
-        break;
-      }
-
-      return true;
-    }
-  }
-  return false;
-}
-
-bool RF_Receive(void)
-{
-  bool rval = false;
-
-  if (RF_ready && rf_chip) {
-    rval = rf_chip->receive();
-  }
-
-//if (rval)
-//Serial.printf("rx at %d s + %d ms\r\n", OurTime, millis()-ref_time_ms);
-
-  return rval;
-}
-
-void RF_Shutdown(void)
-{
-  if (rf_chip) {
-    rf_chip->shutdown();
-  }
-}
-
-uint8_t RF_Payload_Size(uint8_t protocol)
-{
-  switch (protocol)
-  {
-    case RF_PROTOCOL_LEGACY:    return legacy_proto_desc.payload_size;
-    case RF_PROTOCOL_LATEST:    return legacy_proto_desc.payload_size;
-    case RF_PROTOCOL_OGNTP:     return ogntp_proto_desc.payload_size;
-    case RF_PROTOCOL_P3I:       return p3i_proto_desc.payload_size;
-    case RF_PROTOCOL_FANET:     return fanet_proto_desc.payload_size;
-#if !defined(EXCLUDE_UAT978)
-    case RF_PROTOCOL_ADSB_UAT:  return uat978_proto_desc.payload_size;
-#endif
-    default:                    return 0;
-  }
-}
 
 #if !defined(EXCLUDE_NRF905)
 /*
@@ -697,7 +233,7 @@ uint8_t RF_Payload_Size(uint8_t protocol)
  *
  */
 
-static uint8_t nrf905_channel_prev = (uint8_t) -1;
+static uint8_t nrf905_channel_prev = RF_CHANNEL_NONE;
 static bool nrf905_receive_active  = false;
 
 static bool nrf905_probe()
@@ -878,7 +414,7 @@ static bool sx12xx_receive_complete = false;
 bool sx12xx_receive_active = false;
 static bool sx12xx_transmit_complete = false;
 
-static uint8_t sx12xx_channel_prev = (uint8_t) -1;
+static uint8_t sx12xx_channel_prev = RF_CHANNEL_NONE;
 
 #if defined(USE_BASICMAC)
 void os_getDevEui (u1_t* buf) { }
@@ -1006,6 +542,7 @@ static bool sx1262_probe()
 static void sx12xx_channel(uint8_t channel)
 {
   if (channel != sx12xx_channel_prev) {
+
     uint32_t frequency = RF_FreqPlan.getChanFrequency(channel);
     int8_t fc = settings->freq_corr;
 
@@ -1046,7 +583,7 @@ static void sx12xx_setup()
   // Reset the MAC state. Session and pending data transfers will be discarded.
   LMIC_reset();
 
-  switch (settings->rf_protocol)
+  switch (current_RF_protocol)
   {
   case RF_PROTOCOL_OGNTP:
     LMIC.protocol = &ogntp_proto_desc;
@@ -1081,6 +618,9 @@ static void sx12xx_setup()
     break;
   }
 
+  sx12xx_channel_prev = RF_CHANNEL_NONE;
+       // force channel setting on next call - even if channel has not changed
+
   switch(settings->txpower)
   {
   case RF_TX_POWER_FULL:
@@ -1097,16 +637,20 @@ static void sx12xx_setup()
       if (LMIC.txpow > 20)
         LMIC.txpow = 20;
     }
-
-#if 1
-    /*
-     * Enforce Tx power limit until confirmation
-     * that RFM95W is doing well
-     * when antenna is not connected
-     */
-    if (LMIC.txpow > 17)
-      LMIC.txpow = 17;
-#endif
+    // Most T-Beams have an sx1276, hope it can survive without an antenna.
+    // The sx1262 has internal protection against antenna mismatch.
+    // And yet the T-Echo instructions warn against using without an antenna.
+    // Note that the regional legal limit RF_FreqPlan.MaxTxPower also applies,
+    //   it is only 14 dBm in EU, but 30 in Americas, India & Australia.
+    if (hw_info.model != SOFTRF_MODEL_PRIME_MK2) {
+        /*
+         * Enforce Tx power limit until confirmation
+         * that RFM95W is doing well
+         * when antenna is not connected
+         */
+        if (LMIC.txpow > 17)
+            LMIC.txpow = 17;
+    }
     break;
   case RF_TX_POWER_OFF:
   case RF_TX_POWER_LOW:
@@ -1702,7 +1246,7 @@ EasyLink myLink;
 EasyLink_TxPacket txPacket;
 #endif /* EXCLUDE_OGLEP3 */
 
-static uint8_t cc13xx_channel_prev = (uint8_t) -1;
+static uint8_t cc13xx_channel_prev = RF_CHANNEL_NONE;
 
 static bool cc13xx_receive_complete  = false;
 static bool cc13xx_receive_active    = false;
@@ -2185,7 +1729,7 @@ static void cc13xx_shutdown()
 
 static RFM_TRX  TRX;
 
-static uint8_t ognrf_channel_prev  = (uint8_t) -1;
+static uint8_t ognrf_channel_prev  = RF_CHANNEL_NONE;
 static bool ognrf_receive_active   = false;
 
 void RFM_Select  (void)                 { hal_pin_nss(0); }
@@ -2414,3 +1958,583 @@ static void ognrf_shutdown()
 }
 
 #endif /* USE_OGN_RF_DRIVER */
+
+
+// The wrapper code common to all the RF chips:
+
+// these protocols share the frequency plan and time slots
+// - ADS-L can be added here?
+bool in_family(uint8_t protocol)
+{
+    if (protocol == RF_PROTOCOL_LATEST)
+        return true;
+    if (protocol == RF_PROTOCOL_LEGACY)
+        return true;
+    if (protocol == RF_PROTOCOL_OGNTP)
+        return true;
+    return false;
+}
+
+byte RF_setup(void)
+{
+
+  if (rf_chip == NULL) {
+#if !defined(USE_OGN_RF_DRIVER)
+#if !defined(EXCLUDE_SX12XX)
+#if !defined(EXCLUDE_SX1276)
+    if (sx1276_ops.probe()) {
+      rf_chip = &sx1276_ops;
+#else
+    if (false) {
+#endif
+#if defined(USE_BASICMAC)
+#if !defined(EXCLUDE_SX1276)
+      SX12XX_LL = &sx127x_ll_ops;
+#endif
+    } else if (sx1262_ops.probe()) {
+      rf_chip = &sx1262_ops;
+      SX12XX_LL = &sx126x_ll_ops;
+#endif /* USE_BASICMAC */
+#else
+    if (false) {
+#endif /* EXCLUDE_SX12XX */
+#if !defined(EXCLUDE_NRF905)
+    } else if (nrf905_ops.probe()) {
+      rf_chip = &nrf905_ops;
+#endif /* EXCLUDE_NRF905 */
+#if !defined(EXCLUDE_UATM)
+    } else if (uatm_ops.probe()) {
+      rf_chip = &uatm_ops;
+#endif /* EXCLUDE_UATM */
+#if !defined(EXCLUDE_CC13XX)
+    } else if (cc13xx_ops.probe()) {
+      rf_chip = &cc13xx_ops;
+#endif /* EXCLUDE_CC13XX */
+    }
+    if (rf_chip && rf_chip->name) {
+      Serial.print(rf_chip->name);
+      Serial.println(F(" RFIC is detected."));
+    } else {
+      Serial.println(F("WARNING! None of supported RFICs is detected!"));
+    }
+#else /* USE_OGN_RF_DRIVER */
+    if (ognrf_ops.probe()) {
+      rf_chip = &ognrf_ops;
+      Serial.println(F("OGN_DRV: RFIC is detected."));
+    } else {
+      Serial.println(F("WARNING! RFIC is NOT detected."));
+    }
+#endif /* USE_OGN_RF_DRIVER */
+  }
+
+  /* "AUTO" and "UK" freqs now mapped to EU */
+  if (settings->band == RF_BAND_AUTO)
+      settings->band == RF_BAND_EU;
+  if (settings->band == RF_BAND_UK)
+      settings->band == RF_BAND_EU;
+  /* Supersede EU plan with UK when PAW is selected */
+    if (rf_chip                &&
+#if !defined(EXCLUDE_NRF905)
+        rf_chip != &nrf905_ops &&
+#endif
+        settings->band == RF_BAND_EU
+            && settings->rf_protocol == RF_PROTOCOL_P3I)
+      settings->band == RF_BAND_UK;
+
+  current_RF_protocol = settings->rf_protocol;
+
+  RF_FreqPlan.setPlan(settings->band, current_RF_protocol);
+
+  if (settings->altprotocol == settings->rf_protocol
+        || ! in_family(settings->rf_protocol)
+        || ! in_family(settings->altprotocol)
+        || (rf_chip != &sx1276_ops && rf_chip != &sx1262_ops)) {
+      settings->altprotocol = RF_PROTOCOL_NONE;
+  }
+
+  if (rf_chip) {
+
+    rf_chip->setup();
+
+    const rf_proto_desc_t *p;
+
+    switch (current_RF_protocol)
+    {
+      case RF_PROTOCOL_OGNTP:     p = &ogntp_proto_desc;  break;
+      case RF_PROTOCOL_P3I:       p = &p3i_proto_desc;    break;
+      case RF_PROTOCOL_FANET:     p = &fanet_proto_desc;  break;
+#if !defined(EXCLUDE_UAT978)
+      case RF_PROTOCOL_ADSB_UAT:  p = &uat978_proto_desc; break;
+#endif
+      case RF_PROTOCOL_LEGACY:
+      case RF_PROTOCOL_LATEST:
+      default:                    p = &legacy_proto_desc; break;
+    }
+
+    RF_timing         = p->tm_type;
+
+    ts                = &Time_Slots;
+    ts->air_time      = p->air_time;
+    ts->interval_min  = p->tx_interval_min;
+    ts->interval_max  = p->tx_interval_max;
+    ts->interval_mid  = (p->tx_interval_max + p->tx_interval_min) / 2;
+    ts->s0.begin      = p->slot0.begin;
+    ts->s1.begin      = p->slot1.begin;
+    ts->s0.duration   = p->slot0.end - p->slot0.begin;
+    ts->s1.duration   = p->slot1.end - p->slot1.begin;
+
+    uint16_t duration = ts->s0.duration + ts->s1.duration;
+    ts->adj = duration > ts->interval_mid ? 0 : (ts->interval_mid - duration) / 2;
+
+    if (settings->altprotocol == RF_PROTOCOL_OGNTP)
+        altprotocol_encode = ogntp_encode;
+    else if (settings->altprotocol != RF_PROTOCOL_NONE)
+        altprotocol_encode = legacy_encode;
+    else
+        altprotocol_encode = protocol_encode;
+
+    return rf_chip->type;
+
+  }
+
+  return RF_IC_NONE;
+}
+
+
+/* original code, now only called for protocols other than Legacy: */
+void RF_SetChannel(void)
+{
+  tmElements_t  tm;
+  time_t        Time;
+  uint8_t       Slot;
+  uint32_t now_ms, pps_btime_ms, time_corr_neg;
+
+  switch (settings->mode)
+  {
+  case SOFTRF_MODE_TXRX_TEST:
+    Time = now();
+    RF_timing = RF_timing == RF_TIMING_2SLOTS_PPS_SYNC ?
+                RF_TIMING_INTERVAL : RF_timing;
+    break;
+#if !defined(EXCLUDE_MAVLINK)
+  case SOFTRF_MODE_UAV:
+    Time = the_aircraft.location.gps_time_stamp / 1000000;
+    RF_timing = RF_timing == RF_TIMING_2SLOTS_PPS_SYNC ?
+                RF_TIMING_INTERVAL : RF_timing;
+    break;
+#endif /* EXCLUDE_MAVLINK */
+
+  case SOFTRF_MODE_NORMAL:
+  default:
+
+    now_ms = millis();
+    pps_btime_ms = SoC->get_PPS_TimeMarker();
+
+    if (pps_btime_ms) {
+      if (now_ms > pps_btime_ms + 1010)
+        pps_btime_ms += 1000;
+      uint32_t last_Commit_Time = now_ms - gnss.time.age();
+      if (pps_btime_ms <= last_Commit_Time) {
+        time_corr_neg = (last_Commit_Time - pps_btime_ms) % 1000;
+      } else {
+        time_corr_neg = 1000 - ((pps_btime_ms - last_Commit_Time) % 1000);
+      }
+      ref_time_ms = pps_btime_ms;
+    } else {
+      uint32_t last_RMC_Commit = now_ms - gnss.date.age();
+      time_corr_neg = 100;
+      if (gnss_chip)
+          time_corr_neg = gnss_chip->rmc_ms;
+      ref_time_ms = last_RMC_Commit - time_corr_neg;
+    }
+
+    int yr    = gnss.date.year();
+    if( yr > 99)
+        yr    = yr - 1970;
+    else
+        yr    += 30;
+    tm.Year   = yr;
+    tm.Month  = gnss.date.month();
+    tm.Day    = gnss.date.day();
+    tm.Hour   = gnss.time.hour();
+    tm.Minute = gnss.time.minute();
+    tm.Second = gnss.time.second();
+
+//  Time = makeTime(tm) + (gnss.time.age() - time_corr_neg) / 1000;
+    Time = makeTime(tm) + (gnss.time.age() + time_corr_neg) / 1000;
+    OurTime = Time;
+
+    break;
+  }
+
+  switch (RF_timing)
+  {
+  case RF_TIMING_2SLOTS_PPS_SYNC:
+    if ((now_ms - ts->s0.tmarker) >= ts->interval_mid) {
+      ts->s0.tmarker = ref_time_ms + ts->s0.begin - ts->adj;
+      ts->current = 0;
+    }
+    if ((now_ms - ts->s1.tmarker) >= ts->interval_mid) {
+      ts->s1.tmarker = ref_time_ms + ts->s1.begin;
+      ts->current = 1;
+    }
+    Slot = ts->current;
+    break;
+  case RF_TIMING_INTERVAL:
+  default:
+    Slot = 0;
+    break;
+  }
+
+  uint8_t OGN = (settings->rf_protocol == RF_PROTOCOL_OGNTP ? 1 : 0);
+
+  uint8_t chan = RF_FreqPlan.getChannel(Time, Slot, OGN);
+
+#if DEBUG
+  int("Plan: "); Serial.println(RF_FreqPlan.Plan);
+  Serial.print("Slot: "); Serial.println(Slot);
+  Serial.print("OGN: "); Serial.println(OGN);
+  Serial.print("Channel: "); Serial.println(chan);
+#endif
+
+  if (RF_ready && rf_chip) {
+    rf_chip->channel(chan);
+  }
+}
+
+void RF_loop()
+{
+  if (!RF_ready) {
+    if (RF_FreqPlan.Plan == RF_BAND_AUTO) {
+      if (ThisAircraft.latitude || ThisAircraft.longitude) {
+        RF_FreqPlan.setPlan((int32_t)(ThisAircraft.latitude  * 600000),
+                            (int32_t)(ThisAircraft.longitude * 600000),
+                            settings->rf_protocol);
+        RF_ready = true;
+      }
+    } else {
+      RF_ready = true;
+    }
+  }
+
+  /* Experimental code by Moshe Braner, specific to Legacy Protocol */
+  /* More correct on frequency hopping & time slots, and uses less CPU time */
+  /* - requires OurTime to be set to UTC time in seconds - can do in Time_loop() */
+  /* - also needs time since PPS, it is stored in ref_time_ms */
+
+  if (settings->rf_protocol != RF_PROTOCOL_LEGACY
+   && settings->rf_protocol != RF_PROTOCOL_LATEST
+   && settings->rf_protocol != RF_PROTOCOL_OGNTP) {
+    RF_SetChannel();    /* use original code */
+    return;
+  }
+
+  if (ref_time_ms == 0)   /* no GNSS time yet */
+    return;
+
+  uint32_t now_ms = millis();
+
+  RF_time = OurTime;      // may have been updated in Time_loop since last RF_loop
+
+  if (now_ms < ref_time_ms) {   /* should not happen */
+    --OurTime;
+    ref_time_ms -= 1000;
+    return;
+  }
+
+  uint32_t ms_since_pps = now_ms - ref_time_ms;
+  if (ms_since_pps >= 1300) {   // should not happen since Time_loop takes care of this
+    ++OurTime;
+    ++RF_time;
+    ref_time_ms += 1000;
+    ms_since_pps -= 1000;
+  }
+
+  uint32_t slot_base_ms = ref_time_ms;
+  if (ms_since_pps < 300) {  /* does not happen often, since normally RF_OK_until 300 */
+    /* channel does _NOT_ change at PPS rollover in middle of slot 1 */
+    /* - therefore change the reference second to the previous one: */
+    --RF_time;
+    slot_base_ms -= 1000;
+    ms_since_pps += 1000;
+  }
+
+  // do this after RF_time has been perhaps updated
+  // (which should happen at 300ms after PPS, between Slot 1 and Slot 0)
+  if (now_ms < RF_OK_until) {   /* channel already computed */
+    //if (rf_chip)
+    //  rf_chip->channel(RF_current_chan);
+          // if the channel has not changed this does nothing
+          // otherwise it calls os_radio(RADIO_RST) etc
+    return;
+  }
+
+  if (ms_since_pps >= 300 && ms_since_pps < 800) {
+
+    RF_current_slot = 0;
+    RF_OK_until = slot_base_ms + 800;
+    TxEndMarker = slot_base_ms + 795;
+    if (relay_waiting) {
+        TxTimeMarker = TxEndMarker;     // prevent transmission (relay bypasses this)
+        relay_waiting = false;
+    } else {
+        TxTimeMarker = slot_base_ms + 405 + SoC->random(0, 385);
+    }
+
+  } else if (ms_since_pps >= 800 && ms_since_pps < 1200) {
+
+    RF_current_slot = 1;
+    /* channel does _NOT_ change at PPS rollover in middle of slot 1 */
+    RF_OK_until = slot_base_ms + 1300;
+    if ((RF_time & 0x0F) == 0x0F
+           && settings->rf_protocol == RF_PROTOCOL_LATEST
+           && settings->altprotocol == RF_PROTOCOL_NONE) {
+        // some other receivers may mis-decrypt packets sent after the next PPS
+        // so squeeze the transmissions into the pre-PPS half of the slot
+        TxEndMarker = slot_base_ms + 995;
+        TxTimeMarker = slot_base_ms + 805 + SoC->random(0, 185);
+    } else {
+        TxEndMarker = slot_base_ms + 1195;
+        if ((RF_time & 0x0F) == 0x0F) {
+            if (alt_relay_waiting) {
+                TxTimeMarker = TxEndMarker;     // prevent transmission (relay bypasses this)
+                alt_relay_waiting = false;
+            } else {
+                TxTimeMarker = slot_base_ms + 805 + SoC->random(0, 385);
+            }
+        } else {
+            TxTimeMarker = slot_base_ms + 805 + SoC->random(0, 385);
+        }
+    }
+
+  } else { /* 129x ms seems to happen occasionally */
+
+    //RF_current_slot = 1;
+    RF_OK_until = slot_base_ms + 1300;
+    TxTimeMarker = RF_OK_until;          /* do not transmit for now */
+    TxEndMarker  = RF_OK_until;
+    return;
+  }
+
+  // transmit one packet in altprotocol (OGNTP) protocol once every 16 seconds
+  if (settings->altprotocol != RF_PROTOCOL_NONE
+     /* which is only possible if:
+        && settings->altprotocol != settings->rf_protocol
+        && in_family(settings->rf_protocol)
+        && in_family(settings->altprotocol)
+        && (rf_chip == &sx1276_ops || rf_chip == &sx1262_ops)*/
+        && (RF_time & 0x0F) == 0x0F && RF_current_slot == 1) {
+
+      current_RF_protocol = settings->altprotocol;
+      Serial.println("switching to altprotocol for one time slot");
+      // but postpone re-setup of the radio chip until just before transmission
+
+  } else {
+
+      if (current_RF_protocol != settings->rf_protocol) {
+          // if somehow missed going back to normal right after TX, do it now
+          current_RF_protocol = settings->rf_protocol;
+          rf_chip->setup();
+      }
+
+  }
+
+  // do this in the main protocol, for reception
+  uint8_t OGN = (settings->rf_protocol == RF_PROTOCOL_OGNTP ? 1 : 0);
+  RF_current_chan = RF_FreqPlan.getChannel((time_t)RF_time, RF_current_slot, OGN);
+  if (rf_chip)
+      rf_chip->channel(RF_current_chan);
+
+//Serial.printf("Prot %d, Slot %d set for sec %d at PPS+%d ms, PPS %d, tx ok %d - %d, gd to %d\r\n",
+//OGN, RF_current_slot, (RF_time & 0x0F), ms_since_pps, slot_base_ms, TxTimeMarker, TxEndMarker, RF_OK_until);
+}
+
+bool RF_Transmit_Ready()
+{
+    uint32_t now_ms = millis();
+    if (! TxEndMarker)                     // for other protocols
+        return (now_ms > TxTimeMarker);
+    return (now_ms >= TxTimeMarker && now_ms < TxEndMarker);
+}
+
+bool RF_Transmit_Happened()
+{
+    if (! TxEndMarker)
+        return (TxTimeMarker > millis());   // for other protocols
+    return (TxTimeMarker == RF_OK_until);
+}
+
+size_t RF_Encode(container_t *fop, bool wait)
+{
+  size_t size = 0;
+  if (RF_ready && protocol_encode) {
+
+    if (settings->txpower == RF_TX_POWER_OFF ) {
+      return size;
+    }
+
+    // encode in the current tx protocol (may differ from rx protocol)
+    if (current_RF_protocol == RF_PROTOCOL_LEGACY ||
+        current_RF_protocol == RF_PROTOCOL_LATEST ||
+        current_RF_protocol == RF_PROTOCOL_OGNTP) {
+      if (RF_Transmit_Ready() || (!wait && !RF_Transmit_Happened())) {
+          if (current_RF_protocol != settings->rf_protocol)
+              size = (*altprotocol_encode)((void *) &TxBuffer[0], fop);
+          else
+              size = (*protocol_encode)((void *) &TxBuffer[0], fop);
+      }
+    } else {
+      if (millis() > TxTimeMarker) {
+        size = (*protocol_encode)((void *) &TxBuffer[0], fop);
+      }
+    }
+  }
+  return size;
+}
+
+void RF_chip_reset()
+{
+#if !defined(EXCLUDE_SX12XX)
+    sx12xx_setup();
+    uint8_t OGN = (current_RF_protocol == RF_PROTOCOL_OGNTP ? 1 : 0);
+    RF_current_chan = RF_FreqPlan.getChannel((time_t)RF_time, RF_current_slot, OGN);
+    sx12xx_channel(RF_current_chan);
+//Serial.printf("reset to Prot %d at millis %d, tx ok %d - %d, gd to %d\r\n",
+//OGN, millis(), TxTimeMarker, TxEndMarker, RF_OK_until);
+#endif
+}
+
+bool RF_Transmit(size_t size, bool wait)   // only called with no-wait for air-relay
+{
+  if (RF_ready && rf_chip && (size > 0)) {
+
+    if (settings->txpower == RF_TX_POWER_OFF)
+      return true;
+
+    RF_tx_size = size;
+
+    /* Experimental code by Moshe Braner, specific to Legacy Protocol */
+    if (settings->rf_protocol == RF_PROTOCOL_LATEST
+     || settings->rf_protocol == RF_PROTOCOL_LEGACY
+     || settings->rf_protocol == RF_PROTOCOL_OGNTP) {
+      if (RF_Transmit_Ready() || (!wait && !RF_Transmit_Happened())) {
+
+        if (current_RF_protocol != settings->rf_protocol) {
+            // need to actually switch to the alt protocol
+            RF_chip_reset();
+            //Serial.println("transmitting in altprotocol...");
+        }
+
+//Serial.printf("TX at millis %d\r\n", millis());
+
+        rf_chip->transmit();
+        tx_packets_counter++;
+        RF_tx_size = 0;
+        TxTimeMarker = RF_OK_until;  // do not transmit again (even relay) until next slot
+        /* do not set next transmit time here - it is done in RF_loop() */
+
+        if (current_RF_protocol != settings->rf_protocol) {
+            // done the once-in-16s transmission in altprotocol, go back to normal ASAP
+            delay(20);
+            current_RF_protocol = settings->rf_protocol;
+            RF_chip_reset();
+            //Serial.println("returned to normal protocol...");
+        }
+
+//Serial.println(">");
+//Serial.printf("> tx at %d s + %d ms\r\n", OurTime, millis()-ref_time_ms);
+#if 0
+if ((settings->debug_flags & (DEBUG_DEEPER | DEBUG_LEGACY)) == (DEBUG_DEEPER | DEBUG_LEGACY)) {
+uint32_t ms = millis();
+if (ms < ref_time_ms)  ms = 0;
+else   ms -= ref_time_ms;
+if (ms > 999)  ms = 999;
+Serial.printf("> tx %d s %3d ms (%02d:%02d) timebits %2d chan %2d\r\n",
+OurTime, ms, (int)gnss.time.minute(), (int)gnss.time.second(), (RF_time & 0x0F), RF_current_chan);
+}
+#endif
+        return true;
+      }
+
+      return false;
+    }
+
+    /* original code for other protocols: */
+
+    if (!wait || millis() > TxTimeMarker) {
+
+      time_t timestamp = now();
+
+      rf_chip->transmit();
+
+      if (settings->nmea_p) {
+        StdOut.print(F("$PSRFO,"));
+        StdOut.print((uint32_t) timestamp);
+        StdOut.print(F(","));
+        StdOut.println(Bin2Hex((byte *) &TxBuffer[0],
+                               RF_Payload_Size(current_RF_protocol)));
+      }
+      tx_packets_counter++;
+      RF_tx_size = 0;
+
+      Slot_descr_t *next;
+      uint32_t adj;
+
+      switch (RF_timing)
+      {
+      case RF_TIMING_2SLOTS_PPS_SYNC:
+        next = RF_FreqPlan.Channels == 1 ? &(ts->s0) :
+               ts->current          == 1 ? &(ts->s0) : &(ts->s1);
+        adj  = ts->current ? ts->adj   : 0;
+        TxTimeMarker = next->tmarker    +
+                       ts->interval_mid +
+                       SoC->random(adj, next->duration - ts->air_time);
+        break;
+      case RF_TIMING_INTERVAL:
+      default:
+        TxTimeMarker = millis() + SoC->random(ts->interval_min, ts->interval_max) - ts->air_time;
+        break;
+      }
+
+      return true;
+    }
+  }
+  return false;
+}
+
+bool RF_Receive(void)
+{
+  bool rval = false;
+
+  if (RF_ready && rf_chip) {
+    rval = rf_chip->receive();
+  }
+
+//if (rval)
+//Serial.printf("rx at %d s + %d ms\r\n", OurTime, millis()-ref_time_ms);
+
+  return rval;
+}
+
+void RF_Shutdown(void)
+{
+  if (rf_chip) {
+    rf_chip->shutdown();
+  }
+}
+
+uint8_t RF_Payload_Size(uint8_t protocol)
+{
+  switch (protocol)
+  {
+    case RF_PROTOCOL_LEGACY:    return legacy_proto_desc.payload_size;
+    case RF_PROTOCOL_LATEST:    return legacy_proto_desc.payload_size;
+    case RF_PROTOCOL_OGNTP:     return ogntp_proto_desc.payload_size;
+    case RF_PROTOCOL_P3I:       return p3i_proto_desc.payload_size;
+    case RF_PROTOCOL_FANET:     return fanet_proto_desc.payload_size;
+#if !defined(EXCLUDE_UAT978)
+    case RF_PROTOCOL_ADSB_UAT:  return uat978_proto_desc.payload_size;
+#endif
+    default:                    return 0;
+  }
+}

@@ -74,9 +74,9 @@ enum
 
 enum
 {
-  RF_TX_POWER_FULL,
+  RF_TX_POWER_OFF,
   RF_TX_POWER_LOW,
-  RF_TX_POWER_OFF
+  RF_TX_POWER_FULL
 };
 
 typedef struct rfchip_ops_struct {
@@ -113,9 +113,10 @@ uint8_t parity(uint32_t);
 byte    RF_setup(void);
 void    RF_SetChannel(void);
 void    RF_loop(void);
-size_t  RF_Encode(container_t *);
 bool    RF_Transmit_Ready();
-bool    RF_Transmit(size_t, bool);
+bool    RF_Transmit_Happened();
+size_t  RF_Encode(container_t *cip, bool wait=true);
+bool    RF_Transmit(size_t size, bool wait=true);
 bool    RF_Receive(void);
 void    RF_Shutdown(void);
 uint8_t RF_Payload_Size(uint8_t);
@@ -125,6 +126,7 @@ extern uint32_t TxTimeMarker;
 extern uint32_t TxEndMarker;
 extern time_t RF_time;
 extern uint8_t RF_current_slot;
+extern uint8_t current_RF_protocol;
 
 extern const rfchip_ops_t *rf_chip;
 extern bool RF_SX12XX_RST_is_connected;
