@@ -696,12 +696,15 @@ static void ESP32_setup()
         PMU->disablePowerOutput(XPOWERS_DLDO2);
 
         // ALDO 500~3500mV, 100mV/step, IMAX=300mA
-        //PMU->setButtonBatteryChargeVoltage(3100); // GNSS battery
+        //PMU->setButtonBatteryChargeVoltage(3100); // GNSS battery - old syntax
 
         // PMU->enableDC1();
-        //PMU->enableButtonBatteryCharge();    // <<< this syntax not available via this API
+        //PMU->enableButtonBatteryCharge();    // <<< this old syntax not available via this API
 
+        // new syntax: GNSS RTC PowerVDD
+        PMU->setPowerChannelVoltage(XPOWERS_VBACKUP, 3300);
         PMU->enablePowerOutput(XPOWERS_VBACKUP);
+
         PMU->enablePowerOutput(XPOWERS_ALDO1);
 
         PMU->setPowerChannelVoltage(XPOWERS_ALDO2, 3300); // LoRa, AXP2101 power-on value: 2800
@@ -1434,7 +1437,7 @@ static void ESP32_loop()
     //   and turn off if not transmitting
     if (millis() > BlueLEDTimeMarker) {
       float volts = Battery_voltage();
-      if (! isValidFix() || ! leap_seconds_valid()) {
+      if (! isValidFix()) {
         blue_LED_new_state = XPOWERS_CHG_LED_BLINK_4HZ;
       } else if (settings->txpower == RF_TX_POWER_OFF) {
         blue_LED_new_state = XPOWERS_CHG_LED_OFF;
@@ -1501,7 +1504,9 @@ static void ESP32_fini(int reason)
       PMU->setChargingLedMode(XPOWERS_CHG_LED_CTRL_CHG);
              // The charging indicator is controlled by the charger
 
-      //PMU->disableButtonBatteryCharge();
+      //PMU->disableButtonBatteryCharge();  - old syntax
+      //PMU->disablePowerOutput(XPOWERS_VBACKUP);  - new syntax
+      //   - but prefer to keep the GNSS data alive so don't do that
 
 #if PMK2_SLEEP_MODE == 2
       { int ret;
@@ -1567,7 +1572,9 @@ static void ESP32_fini(int reason)
       PMU->setChargingLedMode(XPOWERS_CHG_LED_CTRL_CHG);
              // The charging indicator is controlled by the charger
 
-      //PMU->disableButtonBatteryCharge();
+      //PMU->disableButtonBatteryCharge();  - old syntax
+      //PMU->disablePowerOutput(XPOWERS_VBACKUP);  - new syntax
+      //   - but prefer to keep the GNSS data alive so don't do that
 
       PMU->disablePowerOutput(XPOWERS_ALDO2);
       PMU->disablePowerOutput(XPOWERS_ALDO3);
@@ -2708,7 +2715,7 @@ bool ESP32_onExternalPower() {
         break;
     case PMU_NONE:
     default:
-        return true;
+        return (Battery_voltage() >= 4.1);
         break;
     }
 }
@@ -2988,9 +2995,7 @@ void handleEvent2(AceButton* button, uint8_t eventType,
   // (Long-press the first button on the T-Beam v0.7)
   // But in winch mode the button turns transmissions on/off instead.
   // Can also double-click middle button to toggle test_mode
-  // Can also long-press middle button to turn off Bluetooth until next boot
-  //    - this can help one reach the web interface
-  // Note that now any web access turns BT off, without the button press.
+  // Can also long-press middle button to turn on "landed_out_mode"
 
   switch (eventType) {
     case AceButton::kEventReleased:
@@ -3022,6 +3027,17 @@ void handleEvent2(AceButton* button, uint8_t eventType,
       do_test_mode();
       break;
     case AceButton::kEventLongPressed:
+#if 1
+      if (landed_out_mode) {
+          landed_out_mode = false;
+          OLED_msg("NORMAL", "MODE");
+          Serial.println("landed_out_mode off");
+      } else {
+          landed_out_mode = true;
+          OLED_msg("LANDED", "OUT");
+          Serial.println("landed_out_mode on");
+      }
+#else
       if (settings->bluetooth != BLUETOOTH_OFF && millis() > 15000) {
           if (SoC->Bluetooth_ops) {
               Serial.println(F("Turning off Bluetooth due to button press"));
@@ -3029,6 +3045,7 @@ void handleEvent2(AceButton* button, uint8_t eventType,
               bt_turned_off = true;
           }
       }
+#endif
       break;
   }
 }
