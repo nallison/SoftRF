@@ -62,7 +62,7 @@ enum
 	TRAFFIC_ALARM_NONE,
 	TRAFFIC_ALARM_DISTANCE,
 	TRAFFIC_ALARM_VECTOR,
-	TRAFFIC_ALARM_LEGACY
+	TRAFFIC_ALARM_LATEST
 };
 
 enum
@@ -79,7 +79,7 @@ enum
 
 #define TRAFFIC_ALERT_SOUND   1
 
-bool air_relay(container_t *fop);
+void air_relay(container_t *fop);
 void AddTraffic(ufo_t *fop, const char *callsign);
 void ParseData(void);
 void Traffic_setup(void);
@@ -104,6 +104,7 @@ extern traffic_by_dist_t traffic_by_dist[MAX_TRACKING_OBJECTS];
 extern int max_alarm_level;
 extern bool alarm_ahead;
 extern bool relay_waiting;
+extern bool alt_relay_waiting;
 extern float average_baro_alt_diff;
 extern uint8_t adsb_acfts;
 extern int8_t maxrssi;
