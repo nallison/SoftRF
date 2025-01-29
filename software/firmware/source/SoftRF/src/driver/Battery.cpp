@@ -68,12 +68,18 @@ uint8_t Battery_charge() {
 static bool had_ext_power = false;
 static bool follow_ext_power_shutoff(float voltage)
 {
-#if defined(ESP32)
     if (! settings->power_ext)
         return false;
-    if (hw_info.model != SOFTRF_MODEL_PRIME_MK2)
-        return false;
-    if (ESP32_onExternalPower()) {
+//  if (hw_info.model != SOFTRF_MODEL_PRIME_MK2)
+//      return false;
+#if defined(ESP32)
+    if (ESP32_onExternalPower())
+#else
+    if (voltage >= 4.1)
+    // not great since after full charge it might be >4.1 witout ext power
+    // - but if settings->power_ext is off then no problem
+#endif
+    {
         had_ext_power = true;
         return false;
     }
@@ -86,23 +92,6 @@ static bool follow_ext_power_shutoff(float voltage)
     if (millis() < 3600000)
         return false;
     return true;
-#elif defined(ARDUINO_ARCH_NRF52)
-    if (! settings->power_ext)
-        return false;
-    if (hw_info.model != SOFTRF_MODEL_BADGE)
-        return false;
-//  if (_____onExternalPower())
-//      return false;
-    if (ThisAircraft.airborne)
-        return false;
-    if (voltage >= 3.9)
-        return false;
-    if (millis() < 3600000)
-        return false;
-    return true;
-#else
-    return false;
-#endif
 }
 
 void Battery_loop()
@@ -110,10 +99,14 @@ void Battery_loop()
   if (isTimeToBattery()) {
     float voltage = SoC->Battery_param(BATTERY_PARAM_VOLTAGE);
 
-    if (voltage > BATTERY_THRESHOLD_INVALID &&
-         (voltage < Battery_cutoff() || follow_ext_power_shutoff(voltage))) {
+    int reason = SOFTRF_SHUTDOWN_NONE;
+    if (voltage < Battery_cutoff())
+        reason = SOFTRF_SHUTDOWN_LOWBAT;
+    else if (follow_ext_power_shutoff(voltage))
+        reason = SOFTRF_SHUTDOWN_EXTPWR;
+    if (voltage > BATTERY_THRESHOLD_INVALID && reason != SOFTRF_SHUTDOWN_NONE) {
       if (Battery_cutoff_count > 3) {
-        shutdown(SOFTRF_SHUTDOWN_LOWBAT);
+        shutdown(reason);
       } else {
         Battery_cutoff_count++;
       }
