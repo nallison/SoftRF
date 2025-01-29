@@ -392,8 +392,9 @@ void Baro_loop()
 
     ThisAircraft.pressure_altitude = Baro_altitude_cache;
     ThisAircraft.baro_alt_diff = ThisAircraft.altitude - ThisAircraft.pressure_altitude;
+
 #if !defined(EXCLUDE_LK8EX1)
-    if (settings->mode == SOFTRF_MODE_MORENMEA && (settings->nmea_s || settings->nmea2_s)) {
+    if ((settings->nmea_s | settings->nmea2_s) & NMEA_S_LK8) {
       snprintf_P(NMEABuffer, sizeof(NMEABuffer), PSTR("$LK8EX1,%d,%.2f,%d,%d,%d*"),
             (int)Baro_pressure_cache,                                      /* Pascals */
             Baro_altitude_cache,                                           /* meters */
@@ -403,7 +404,7 @@ void Baro_loop()
             // - LK8000 specs say send percent instead of volts as an integer, percent+1000
       int nmealen = NMEA_add_checksum();
       NMEA_Source = DEST_NONE;
-      NMEA_Outs(settings->nmea_s, settings->nmea2_s, NMEABuffer, nmealen, false);
+      NMEA_Outs(NMEA_S_LK8, NMEABuffer, nmealen, false);
     }
 #endif /* EXCLUDE_LK8EX1 */
 
