@@ -194,7 +194,10 @@ size_t ogntp_encode(void *pkt, container_t *this_aircraft) {
 
   ogn_tx_pkt.Packet.Header.Address  = this_aircraft->addr;
 
-  if (settings->id_method == ADDR_TYPE_ICAO)
+  uint8_t addr_type = settings->id_method;
+  if (this_aircraft != &ThisAircraft)    // relaying another aircraft
+      addr_type = this_aircraft->addr_type;
+  if (addr_type == ADDR_TYPE_ICAO)
       ogn_tx_pkt.Packet.Header.AddrType = ADDR_TYPE_ICAO;
   else if (settings->rf_protocol == RF_PROTOCOL_OGNTP)
       ogn_tx_pkt.Packet.Header.AddrType = ADDR_TYPE_OGN;  

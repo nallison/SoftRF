@@ -1833,7 +1833,7 @@ void NMEA_Process_SRF_SKV_Sentences()
       } else if (strncmp(C_Version.value(), "?", 1) == 0) {        // $PSRFC,?*47
 
           snprintf_P(NMEABuffer, sizeof(NMEABuffer),
-            PSTR("$PSRFC,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d*"),
+            PSTR("$PSRFC,%d,%d,%d,%d,%d,%d,%d,%d,%d,%X,%X,%X,%X,%d,%d,%d,%d,%d,%d*"),
             PSRFX_VERSION,      settings->mode,      settings->rf_protocol,
             settings->band,     settings->acft_type, settings->alarm,
             settings->txpower,  settings->volume,    settings->pointer,
@@ -1881,7 +1881,7 @@ void NMEA_Process_SRF_SKV_Sentences()
 
           //char psrfd_buf[MAX_PSRFD_LEN];
           snprintf_P(NMEABuffer, sizeof(NMEABuffer),
-            PSTR("$PSRFD,%d,%d,%06X,%06X,%06X,%d,%d,%d,%02X,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d*"),
+            PSTR("$PSRFD,%d,%d,%06X,%06X,%06X,%d,%d,%X,%02X,%d,%X,%X,%X,%X,%X,%d,%d,%d,%d,%X,%X,%d,%d,%d*"),
             PSRFX_VERSION,         settings->id_method,  settings->aircraft_id,
             settings->ignore_id,   settings->follow_id,  settings->baud_rate,
             settings->power_ext,   settings->nmea_d,     settings->debug_flags,

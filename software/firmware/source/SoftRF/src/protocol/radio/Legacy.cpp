@@ -809,7 +809,7 @@ size_t legacy_encode(void *pkt_buffer, container_t *aircraft)
     if (relay)
         pkt->addr_type = aircraft->addr_type | 4;  // marks as a relayed packet
     else
-        pkt->addr_type = settings->id_method;
+        pkt->addr_type = (settings->id_method==ADDR_TYPE_OVERRIDE? ADDR_TYPE_FLARM : settings->id_method);
 
 #if 1
     // relay in old protocol unless relaying landed-out traffic

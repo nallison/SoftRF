@@ -630,7 +630,7 @@ void handleSettings() {
     snprintf_P ( offset, size,
       PSTR("\
 <tr>\
-<th align=left>ICAO ID (6 HEX digits)</th>\
+<th align=left>Aircraft (ICAO) ID (6 HEX digits)</th>\
 <td align=right>\
 <INPUT type='text' name='aircraft_id' maxlength='6' size='6' value='%06X'>\
 </td>\
@@ -647,16 +647,15 @@ void handleSettings() {
 <th align=left>ID type to use:</th>\
 <td align=right>\
 <select name='id_method'>\
-<option %s value='%d'>Random</option>\
 <option %s value='%d'>ICAO</option>\
 <option %s value='%d'>Device</option>\
 <option %s value='%d'>Anonymous</option>\
 </select>\
 </td>\
 </tr>"),
-    (settings->id_method == ADDR_TYPE_RANDOM ? "selected" : ""),    ADDR_TYPE_RANDOM,
     (settings->id_method == ADDR_TYPE_ICAO ? "selected" : ""),      ADDR_TYPE_ICAO,
-    (settings->id_method == ADDR_TYPE_FLARM ? "selected" : ""),     ADDR_TYPE_FLARM,
+    ((settings->id_method!=ADDR_TYPE_ICAO && settings->id_method!=ADDR_TYPE_ANONYMOUS) ? "selected" : ""),
+     (settings->id_method==ADDR_TYPE_OVERRIDE? ADDR_TYPE_OVERRIDE : ADDR_TYPE_FLARM),
     (settings->id_method == ADDR_TYPE_ANONYMOUS ? "selected" : ""), ADDR_TYPE_ANONYMOUS
     );
   

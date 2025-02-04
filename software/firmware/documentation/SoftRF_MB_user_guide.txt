@@ -3,7 +3,7 @@ Basic Documentation for Moshe Braner's version of SoftRF
 
 By Moshe Braner
 
-This version last updated January 27, 2025 to fit software version MB153
+This version last updated February 4, 2025 to fit software version MB154
 The latest version of this document is always here:
   https://github.com/moshe-braner/SoftRF/blob/master/software/firmware/documentation
 or direct link:
@@ -206,11 +206,11 @@ Description of the basic settings:
 
 Mode: normally select "Normal".  GNSS Bridge mode lets one communicate with the GNSS module directly from the USB port, for diagnostics (e.g., using the Ublox U-Center program).  On the T-Echo, can enter this mode via NMEA config, escape this mode with a double-click.  On the T-Beam can exit this mode (or any mode other than "Normal" and "More NMEA") via clicking the middle button, switching to Normal mode.  (Long-press the first button on T-Beam v0.7.)
 
-Device ID: this is unique to each device and you cannot change it.  The first hex digit is always set to "4", to avoid possible duplication of a FLARM device ID.
+Device ID: this is unique to each device and you cannot change it.  The first hex digit is now always set to "8", to avoid possible duplication of a FLARM device ID.  If your device ID (rather than ICAO ID) is registered with OGN, you will need to edit that registration.
 
-ICAO ID: you can enter any ID you want (6 hex digits), but normally this would be the ICAO ID of your aircraft, which is unique.  You can obtain it from the authorities in your country.  In the USA go here: https://registry.faa.gov/aircraftinquiry/Search/NNumberInquiry and in the search results look for "Mode S Code (Base 16 / Hex)".  If you also have a transponder or some other device, setting all of them to the same ID will avoid duplicate reporting of the aircraft in OGN.
+Aircraft ID: 6 hex digits.  If your aircraft is registered, you can enter its ICAO ID, which is unique.  You can obtain it from the authorities in your country.  In the USA go here: https://registry.faa.gov/aircraftinquiry/Search/NNumberInquiry and in the search results look for "Mode S Code (Base 16 / Hex)".  If you also have a transponder or some other device, setting all of them to the same ID will avoid duplicate reporting of the aircraft in OGN.
 
-ID type to use: You can choose Random, ICAO (the ID entered above), Device (the fixed device ID), or Anonymous.  The latter is random but is fixed for the flight, while Random changes during the flight.  Keep in mind that the transmitted ID depends on TWO settings.  E.g., if you enter the ICAO ID into the ID field but leave the ID Type as "device" then it will still transmit the device ID.  Whether you choose ICAO (best), or device ID, you can register your chosen ID on http://ddb.glidernet.org/ as your aircraft.  Then OGN viewers such as https://glidertracker.org/ will display your registration or contest ID.   If you don't register it then only the cryptic transmitted ID will be shown in those viewers.
+ID type to use: You can choose ICAO (the ID entered above), Device (the fixed device ID), or Anonymous.  The latter is random but is fixed for the flight.  Keep in mind that the transmitted ID depends on TWO settings.  E.g., if you enter the ICAO ID into the ID field but leave the ID Type as "device" then it will still transmit the device ID.  Whether you choose ICAO ID, or device ID, you can register your chosen ID on http://ddb.glidernet.org/ as your aircraft.  Then OGN viewers such as https://glidertracker.org/ will display your registration or contest ID.   If you don't register it then only the cryptic transmitted ID will be shown in those viewers.
 
 Protocol:  Choose "Latest" for compatibility with the new (2024) FLARM radio protocol.  Choose "Legacy" for the older FLARM radio protocol.  "Legacy" is visible to SoftRF devices and to OGN stations, but not to FLARMs.  (FLARMs are visible to SoftRF devices in either "Latest" or "Legacy" setting.)  OGNTP is visible to OGN stations but invisible to FLARMS.  If you are using this device to see and be seen by other FLARM-equipped gliders, choose "Latest".  For towplanes: If the device is setting off collision alerts on tow (although that should not happen often), it can be configured to OGNTP (or Legacy), so that it does not alert FLARMs, but is still visible to OGN receivers on the ground for logging purposes.
 

@@ -49,7 +49,7 @@ enum
 	ADDR_TYPE_P3I,       /* not available in id_method settings field */
 	ADDR_TYPE_FANET,     /* not available in id_method settings field */
 	ADDR_TYPE_6,
-	ADDR_TYPE_7
+	ADDR_TYPE_OVERRIDE   // added into id_method settings field dropdown to override chip ID
 };
 
 #define ADDR_TYPE_OGN 3
