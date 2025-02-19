@@ -1272,6 +1272,13 @@ void handleRoot() {
          adsb_packets_counter);
   }
 
+  char tx_s[8];
+  if (settings->txpower == RF_TX_POWER_OFF) {
+      strcpy(tx_s, "OFF");
+  } else {
+      snprintf(tx_s, 8, "%u", tx_packets_counter);
+  }
+
   char traffics[24];
   int acrfts_counter = Traffic_Count();   // maxrssi and adsb_acfts are byproducts
   if (acrfts_counter == 0) {
@@ -1284,6 +1291,8 @@ void handleRoot() {
 
   size_t spiffs_used = SPIFFS.usedBytes();
   size_t spiffs_available = SPIFFS.totalBytes() - spiffs_used;
+
+  yield();
 
   snprintf_P ( Root_temp, size,
     PSTR("<html>\
@@ -1323,8 +1332,8 @@ void handleRoot() {
  </table>\
  <table width=100%%>\
   <tr><th align=left>Packets</th>\
-   <td align=middle>Tx&nbsp;%u</td>\
-   <td align=right>Rx&nbsp;%u</td>\
+   <td align=middle>Tx %s</td>\
+   <td align=right>Rx %u</td>\
   </tr>\
   %s\
   <tr>\
@@ -1393,7 +1402,7 @@ void handleRoot() {
 #endif /* ENABLE_AHRS */
     hr, min % 60, sec % 60, ESP.getFreeHeap(),
     (low_voltage==1? "red" : (low_voltage==0? "green": "black")), str_vbat, str_vusb,
-    tx_packets_counter, rx_packets_counter, adsb_s, acrfts_counter, traffics,
+    tx_s, rx_packets_counter, adsb_s, acrfts_counter, traffics,
     (landed_out_mode? "Active" : "Off"),
     (landed_out_mode? "Stop" : "Activate"),
     ((hw_info.model == SOFTRF_MODEL_PRIME_MK2) ?
@@ -1430,6 +1439,9 @@ void handleRoot() {
   // currently about _____
   serve_html(Root_temp);
   free(Root_temp);
+  yield();
+
+#if 0
   Serial.println(F("Files in SPIFFS:"));
 //  if (!SPIFFS.begin(true)) {
 //      Serial.println(F("Error mounting SPIFFS"));
@@ -1452,6 +1464,7 @@ void handleRoot() {
   file.close();
   root.close();
   Serial.println(F("... end of files in SPIFFS"));
+#endif
 }
 
 void handleInput() {
@@ -1891,7 +1904,9 @@ void list_files(int mode)
       bool is_igc = file_name.endsWith(igc_suffix);
       if (is_igc)
           ++nlogs;
-      if (! is_igc && (mode == LIST_SPIFFS_LOGS || mode == LIST_SD_LOGS))
+      // show NMEA & SD logs too
+      if ((mode == LIST_SPIFFS_LOGS || mode == LIST_SD_LOGS) && (! is_igc) &&
+           (strcmp(fn,"NMEAlog.txt") && strcmp(fn,"NMEAold.txt") && strcmp(fn,"sdlog.txt")))
           continue;
       if (len < FILELSTSIZ-160) {
         strcpy(cp, "&nbsp;<a href=\"");
@@ -2014,10 +2029,13 @@ void list_sd_all()      { list_files(LIST_SD_ALL);      }
 void list_logs()
 {
 #if defined(USE_SD_CARD)
-    if (SD_is_mounted)
+    if (SD_is_mounted) {
+        closeSDlog();
+        closeNMEAlog();
         list_files(LIST_SD_LOGS);
-    else
+    } else {
         list_files(LIST_SPIFFS_LOGS);
+    }
 #else
     list_files(LIST_SPIFFS_LOGS);
 #endif

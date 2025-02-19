@@ -777,7 +777,7 @@ void logOneTraffic(container_t *fop, const char *label)
       label, alarm_level, fop->aircraft_type, addr,
       (int)fop->distance, (int)fop->bearing,
       (int)fop->speed, (int)fop->course, (int)fop->turnrate,
-      (int)fop->RelativeBearing, (int)fop->alt_diff, (int)(fop->vs - ThisAircraft.vs),
+      (int)fop->RelativeHeading, (int)fop->alt_diff, (int)(fop->vs - ThisAircraft.vs),
       (int)ThisAircraft.speed, (int)ThisAircraft.course, (int)ThisAircraft.turnrate,
       (int)(wind_speed * (1.0 / _GPS_MPS_PER_KNOT)), (int)wind_direction);
     //Serial.print(NMEABuffer);
@@ -869,7 +869,7 @@ void Traffic_Update(container_t *fop)
 
     fop->adj_alt_diff = fop->alt_diff;
     fop->adj_distance = fop->distance + VERTICAL_SLOPE * fabs(fop->alt_diff);
-    fop->RelativeBearing = 0;
+    fop->RelativeHeading = 0;
     if (fop->protocol == RF_PROTOCOL_ADSB_1090) {
         if (fop->maxrssi == 0 || fop->rssi > fop->maxrssi) {
             fop->maxrssi = fop->rssi;
@@ -887,7 +887,7 @@ void Traffic_Update(container_t *fop)
     //int rel_bearing = (int) (fop->bearing - ThisAircraft.course);
     int rel_heading = (int) (fop->bearing - ThisAircraft.heading);
     rel_heading += (rel_heading < -180 ? 360 : (rel_heading > 180 ? -360 : 0));
-    fop->RelativeBearing = rel_heading;   // << should rename RelativeHeading
+    fop->RelativeHeading = rel_heading;
 
     if (fop->protocol == RF_PROTOCOL_ADSB_1090) {
         if (fop->mindist == 0 || fop->distance < fop->mindist) {
@@ -950,6 +950,171 @@ void Traffic_Update(container_t *fop)
       }
 //#endif
   }
+}
+
+static float oldrange[12];
+static float newrange[12];
+static uint32_t oldrange_n[12];
+static uint16_t newrange_n[12];
+static float oldrssi_mean;
+static float newrssi_sum;
+static float newrssi_dev;
+static uint32_t oldrssi_n;
+static uint32_t newrssi_n;
+static float oldrssi_ssd;
+static float newrssi_ssd;
+
+static void zero_range_stats()
+{
+    memset(oldrange, 0, sizeof(oldrange));
+    memset(newrange, 0, sizeof(newrange));
+    memset(oldrange_n, 0, sizeof(oldrange_n));
+    memset(newrange_n, 0, sizeof(newrange_n));
+    oldrssi_mean = 0.0;
+    newrssi_sum = 0.0;
+    newrssi_dev = 0.0;
+    oldrssi_n = 0;
+    newrssi_n = 0;
+    oldrssi_ssd = 0.0;
+    newrssi_ssd = 0.0;
+}
+
+#define RANGESTATSVERSION 1
+/*
+    range.txt file structure:
+        version_num = 1
+        linrange,logrange,n  - for oclock=0: lin=km, log=log2(km)
+        ...
+
+        linrange,logrange,n  - for oclock=11
+        rssi_mean,rssi_mean_square_deviation   - n=sum of range n's
+*/
+// try and load range stats from file
+static bool load_range_stats()
+{
+    zero_range_stats();
+    if (! FILESYS.exists("/range.txt")) {
+        Serial.println("range.txt does not exist");
+        return false;
+    }
+    File statsfile = FILESYS.open("/range.txt", FILE_READ);
+    if (! statsfile)
+
+        return false;
+    char buf[64];
+    if (! getline(statsfile, buf, 64)) {
+        statsfile.close();
+        Serial.println("empty range.txt");
+        return false;
+    }
+    int file_version;
+    sscanf(buf, "%d", &file_version);
+    if (file_version != RANGESTATSVERSION) {
+        Serial.println("wrong version of range.txt");
+        statsfile.close();
+        return false;
+    }
+    // read rest of file into range_stats[]
+    Serial.println("reading range.txt...");
+    for (int oclock=0; oclock<12; oclock++) {
+        if (! getline(statsfile, buf, 64)) {
+            Serial.println("range.txt ended early");
+            statsfile.close();
+            zero_range_stats();
+            return false;
+        }
+        //Serial.println(buf);
+        float file_linrange;    // read but ignored
+        sscanf(buf, "%f,%f,%d",
+            &file_linrange,
+            &oldrange[oclock],
+            &oldrange_n[oclock]);
+        snprintf(buf, 64, "%2d: %.1f,%f,%d",
+            oclock,
+            file_linrange,
+            oldrange[oclock],
+            oldrange_n[oclock]);
+        Serial.println(buf);
+        oldrssi_n += oldrange_n[oclock];
+    }
+    if (! getline(statsfile, buf, 64)) {
+        Serial.println("range.txt ended early");
+        statsfile.close();
+        zero_range_stats();
+        return false;
+    }
+    Serial.print("rssi: ");
+    Serial.println(buf);
+    sscanf(buf, "%f,%f", &oldrssi_mean, &oldrssi_ssd);
+    statsfile.close();
+    return true;
+}
+
+void sample_range(container_t *fop)
+{
+    if (! ThisAircraft.airborne)       return;
+    if (! fop->airborne)               return;
+    if (fop->tx_type < TX_TYPE_FLARM)  return;
+    if (fop->distance < 1000.0)        return;
+    if (4.0 * fabs(fop->alt_diff) > fop->distance)    return;
+    int oclock = fop->RelativeHeading + 15;
+    if (oclock < 0)     oclock += 360;
+    if (oclock >= 360)  oclock -= 360;
+    oclock /= 30;
+    newrange[oclock] += log2_approx2(0.001 * fop->distance);
+    ++newrange_n[oclock];
+    float rssi = (float) fop->rssi;
+    newrssi_sum += rssi;
+    float rssi_dev = rssi - oldrssi_mean;
+    newrssi_dev += rssi_dev;
+    newrssi_ssd += rssi_dev * rssi_dev;
+    ++newrssi_n;
+}
+
+// this is called after landing
+void save_range_stats()
+{
+    if (newrssi_n == 0)
+        return;
+    FILESYS.remove("/oldrange.txt");
+    FILESYS.rename("/range.txt", "/oldrange.txt");
+    File statsfile = FILESYS.open("/range.txt", FILE_WRITE);
+    Serial.print(newrssi_n);
+    Serial.println("new samples, writing range.txt...");
+    statsfile.println((int)RANGESTATSVERSION);
+    char buf[64];
+    for (int oclock=0; oclock<12; oclock++) {
+        if (newrange_n[oclock]) {
+            newrange[oclock] += oldrange[oclock] * oldrange_n[oclock];
+            newrange_n[oclock] += oldrange_n[oclock];
+            newrange[oclock] /= newrange_n[oclock];     // new mean
+        } else {   // no new samples in this oclock
+            newrange[oclock] = oldrange[oclock];
+            newrange_n[oclock] = oldrange_n[oclock];
+        }
+        snprintf(buf, 64, "AN,%.1f,%f,%d",
+            (newrange_n[oclock]? exp2_approx2(newrange[oclock]) : 0.0),
+            newrange[oclock],
+            newrange_n[oclock]);
+        Serial.println(buf+3);
+        statsfile.println(buf+3);   // skip the "AN,"
+        FlightLogComment(buf);      // - it will prepend LPLT, resulting in, e.g., LPLTAN,...
+    }
+    newrssi_sum += oldrssi_mean * (float) oldrssi_n;   // total new sum
+    newrssi_n   += oldrssi_n;            // total count
+    newrssi_sum /= (float) newrssi_n;    // new mean
+    float devsquared = (newrssi_dev * newrssi_dev);
+    // - newrssi_sum is the *total* (new & old data) deviations from the old mean
+    oldrssi_ssd *= (float) oldrssi_n;    // old summed square deviations from mean
+    newrssi_ssd += oldrssi_ssd;          // total squared deviations from old mean
+    newrssi_ssd -= devsquared / (float) newrssi_n;   // new variance
+    newrssi_ssd /= (float) newrssi_n;                // new mean_square_deviation
+    snprintf(buf, 64, "AN,%f,%f", newrssi_sum, newrssi_ssd);
+    Serial.println(buf+3);
+    statsfile.println(buf+3);   // skip the "AN,"
+    FlightLogComment(buf);      // - it will prepend LPLT, resulting in, e.g., LPLTAN,...
+    statsfile.close();
+    load_range_stats();         // in case of another flight
 }
 
 /* relay landed-out or ADS-B traffic if we are airborne */
@@ -1233,6 +1398,7 @@ void AddTraffic(ufo_t *fop, const char *callsign)
         CopyTraffic(cip, fop, callsign);
         Calc_Traffic_Distances(cip);
         Traffic_Update(cip);
+        sample_range(cip);
         if (do_relay)  air_relay(cip);
         return;
       }
@@ -1246,6 +1412,7 @@ void AddTraffic(ufo_t *fop, const char *callsign)
         CopyTraffic(cip, fop, callsign);
         Calc_Traffic_Distances(cip);
         Traffic_Update(cip);
+        //sample_range(cip);
         if (do_relay)  air_relay(cip);
         return;
       }
@@ -1289,6 +1456,7 @@ void AddTraffic(ufo_t *fop, const char *callsign)
       CopyTraffic(cip, fop, callsign);
       Copy_Traffic_Distances(cip);     // computed above by Stash_Traffic_Distances(fop)
       Traffic_Update(cip);
+      //sample_range(cip);   - do not sample, aircraft may be closer than max range
       if (do_relay)  air_relay(cip);
       return;
     }
@@ -1357,6 +1525,9 @@ void Traffic_setup()
     Alarm_Level = &Alarm_Distance;
     break;
   }
+
+  load_range_stats();
+
 #if defined(USE_SD_CARD)
     if (settings->rx1090
     && (settings->debug_flags & DEBUG_DEEPER)
@@ -1397,7 +1568,7 @@ void Traffic_loop()
           /* determine if any traffic with alarm level low+ is "ahead" */
           /* - this is for the strobe, increase flashing if "ahead" */
           if (fop->alarm_level >= ALARM_LEVEL_LOW) {
-              if (abs(fop->RelativeBearing) < 45)
+              if (abs(fop->RelativeHeading) < 45)
                   alarm_ahead = true;
           }
 
@@ -1437,6 +1608,7 @@ if (fop->protocol == RF_PROTOCOL_ADSB_1090 && (settings->debug_flags & DEBUG_DEE
     Serial.println(fop->maxrssi);
   }
 }
+          sample_range(fop);
 
           // EmptyContainer(fop);
           fop->addr = 0;
@@ -1501,7 +1673,7 @@ if (fop->protocol == RF_PROTOCOL_ADSB_1090 && (settings->debug_flags & DEBUG_DEE
           snprintf_P(NMEABuffer, sizeof(NMEABuffer),
               PSTR("%02d%02d%02d,%s,%d,%d,%06x,%d,%d,%d\r\n"),
               year, month, day, cp, mfop->alarm_level-1, alarmcount,
-              mfop->addr, (int)mfop->RelativeBearing, (int)mfop->distance, (int)mfop->alt_diff);
+              mfop->addr, (int)mfop->RelativeHeading, (int)mfop->distance, (int)mfop->alt_diff);
 //Serial.println(NMEABuffer);
           int len = strlen(NMEABuffer);
           if (AlarmLog.write((const uint8_t *)NMEABuffer, len) == len) {

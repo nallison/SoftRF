@@ -35,7 +35,7 @@
 #include <raspi/raspi.h>
 #endif /* RASPBERRY_PI */
 
-#define SOFTRF_FIRMWARE_VERSION "MB154"
+#define SOFTRF_FIRMWARE_VERSION "MB155"
 #define SOFTRF_IDENT            "SoftRF"
 #define SOFTRF_USB_FW_VERSION   0x0101
 
@@ -181,7 +181,7 @@ typedef struct CONTAINER {
     uint8_t   next;       // for linking into a list
     uint8_t   alert;      /* bitmap of issued voice/tone/ble/... alerts */
 
-    int16_t   RelativeBearing;    // for voice and strobe - actually relative *heading*
+    int16_t   RelativeHeading;    // for voice and strobe
 
     uint16_t  hdop; /* cm */
     uint16_t  last_crc;

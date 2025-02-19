@@ -2975,6 +2975,7 @@ void handleEvent(AceButton* button, uint8_t eventType,
               OLED_msg("ALARM", " DEMO");
 #if defined(USE_SD_CARD)
               closeSDlog();
+              closeNMEAlog();
 #endif
               //if (settings->logflight == FLIGHT_LOG_ALWAYS)
               completeFlightLog();

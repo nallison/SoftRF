@@ -4,7 +4,7 @@ Preliminary Documentation for Moshe Braner's version of SoftRF
 
 By Moshe Braner
 
-This version last updated February 4, 2025 to fit software version MB154
+This version last updated February 18, 2025 to fit software version MB155
 Get the latest version here:
   https://github.com/moshe-braner/SoftRF/blob/master/software/firmware/documentation
 or direct link:
@@ -62,6 +62,8 @@ compflash - On a T-Beam with an SD card this setting is ignored.  On a T-Beam wi
 
 alarmlog - Alarms Log: If enabled (1), every time a traffic alarm is issued (whether audible or not), a line of text is written into the alarmlog.txt file (in flash). (If flight logging, similar data is also inserted as an LPLT comment.)  This line includes the date, time, lat/lon, alarm level (1-3), aircraft ID, relative heading, and horizontal and vertical separation (in meters).  On the T-Beam, if you want to download this data, use the web interface and click the "Alarm Log: [Download]" button at the bottom of the status page.  The existing file is normally appended to.  If space in the flash file system is low, the alarm log file is erased and a new one created.  You can also do that manually by clicking the "Alarm Log: [Clear]" button on the status page.
 
+log_nmea - option to log all NMEA output to /logs/NMEAlog.txt in the SD card.  (T-Beam only.)
+
 leapsecs - Leap seconds.  Only accessible via editing the settings.txt file.  The value here is used if the GNSS module says "have a fix but leap seconds not known".  This value (default=18 which is correct for 2025) is automatically set to what the GNSS module reports after it gets the leap seconds from a satellite.  Thus there should never be a need to edit it manually.  This is currently only relevant to Ublox GNSS modules (T-Beam).
 
 geoid - Geoid Separation.  Only accessible via editing the settings.txt file.  Most users can ignore this.  Some GNSS modules do not report the "geoid separation".  For example, some older T-Beam versions (v0.7).  If this is the case, the status web page will say "Altitude above ellipsoid - MSL n.a.".  That has no effect on SoftRF operation in the "Latest" protocol which is based on the ellipsoid altitude.  But it means the MSL GNSS altitude reported to connected glide computers is slightly wrong, as is the altitude transmitted in some other protocols.  One way to fix that is to enter the "geoid separation" here manually - an integer between -104 and +84 (meters).  (If 0 is correct, enter 1.)  Alternatively, leave this setting as zero, and upload the file "egm96s.dem" using the button for that in the status page.  Then SoftRF will look up the needed number based on the location.  That file is available here: https://github.com/moshe-braner/SoftRF/blob/master/software/firmware/source/libraries/Geoid/egm96s.dem
@@ -95,11 +97,11 @@ strobe - if an LED or strobe is connected to the T-Beam, choose one of 4 modes:
 
 voice - Voice Warnings: 0=Off, or 1=Internal DAC (analog output via pin 25), or 2=External I2S (pins 14, 15, 25).  Note that the external I2S option precludes use of a buzzer on pins 14 and 15.
 
-extssid - external WiFi network (optional): after booting, SoftRF will try and connect to the external WiFi network, if specified.  If unsuccessful after 10 seconds, it will create its own WiFi network.  If the external network name (SSID) is left blank it will skip that 10-second delay and create the internal network immediately (with the default password - the entered one is ignored).  If the password is blank, but the SSID is not blank, the entered SSID is used as a custom name for the network created by SoftRF (ownssid).  In the case of an external network, the IP address for the web interface is chosen by the external router, and can be seen in the third OLED page (press the pushbutton to change pages).
+ssid - external WiFi network (optional): after booting, SoftRF will try and connect to the external WiFi network, if specified.  If unsuccessful after 10 seconds, it will create its own WiFi network.  If the external network name (SSID) is left blank it will skip that 10-second delay and create the internal network immediately (with the default password - the entered one is ignored).  If the password is blank, but the SSID is not blank, the entered SSID is used as a custom name for the network created by SoftRF (same as the "myssid" setting).  In the case of an external network, the IP address for the web interface is chosen by the external router, and can be seen in the third OLED page (press the pushbutton to change pages).
 
 psk - password for external WiFi network (displays as "******" - does not show the length of the real password).
 
-ownssid - SSID for WiFi network created by SoftRF - if blank, SSID will be based on the chip ID.  For an internal network the IP address to connect to (for the web interface) is always 192.168.1.1.
+myssid - SSID for WiFi network created by SoftRF.  (Also used as the Bluetooth name.)  If blank, SSID (and Bluetooth name) will be based on the chip ID.  For an internal network the IP address to connect to (for the web interface) is always 192.168.1.1 and the password is always 12345678.
 
 tcpmode - TCP mode: Can choose 0=Server (the default) which is what is expected by, e.g., XCsoar or Tophat (if TCP connection is used - the default is UDP), or 1=Client which is needed to connect to XCvario.
 
@@ -419,6 +421,15 @@ Since the flash space on the T-Beam is almost full, as is RAM used, before addin
 Revision of the data structures
 
 Implemented a revision of the data structures at the heart of SoftRF: the "container[]" array.  Each element in it has grown to hundreds of bytes, and was copied over and over for each incoming packet.  Changed to two structure types.  A short one (ufo_t) for data from incoming packets, with only the needed fields (57 bytes).  And a long one (container_t) for the array.  There is a third small one (adsfo_t) with only the fields needed for processing incoming ADS-B messages.
+
+Reception range analysis
+
+From version MB155, SoftRF collects summary data about the distance and reception RSSI of aircraft that either just entered or just left reception range.  The data is stored in a file "range.txt" in the flash file system (SPIFFS on the T-Beam, FATFS on the T-Echo.)  This file is plain text with the following structure (14 lines total):
+        1               # version number
+        9.4,3.226,1234  # range (km), log2(range), number of samples - for "oclock=0" (straight ahead)
+        ...             # similarly for each "oclock" 1 through 11
+        -91.4,2.58      # average RSSI, mean square deviation
+The file is read, new data collected during the flight, and a new version of the file is written after landing.  If a flight log is being recorded, the range statistics are also written as "LPLTAN,..." comment lines in the IGC file.  Samples are only taken if airborne, of other aircraft that are airborne, and at least 1km away and not at too high or low a vertical angle.  ADS-B traffic is not sampled.  The range averaging is done on a log scale, but the range numbers appear as the first item in each line in the file.  If, after enough data has been collected, the range is much lower in some directions than others, the antenna placement may not be ideal.  If the RSSI average is much higher (less negative) than -100, there is radio noise in the cockpit making SoftRF reception less sensitive.  E.g., a USB power converter may generate such noise.  If the RSSI mean square deviation is large, such noise may be intermittent, perhaps caused by a device that is only sometimes carried along or turned on.  To start over collecting range data, delete the file range.txt.
 
 
 KNOWN ISSUES

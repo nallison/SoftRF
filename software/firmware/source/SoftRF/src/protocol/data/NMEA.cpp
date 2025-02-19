@@ -34,6 +34,10 @@
 #include "../../driver/RF.h"
 #include "../../driver/Battery.h"
 #include "../../driver/Baro.h"
+#if defined(USE_SD_CARD)
+#include <SD.h>
+#include <FS.h>
+#endif
 #if defined(ESP32)
 #include "../../driver/OLED.h"
 #include "../../driver/Strobe.h"
@@ -43,7 +47,17 @@
 #include "IGC.h"
 #include "../../TrafficHelper.h"
 
+#if defined(USE_SD_CARD)
+#include <SD.h>
+#include <FS.h>
+#endif
+
 #define ADDR_TO_HEX_STR(s, c) (s += ((c) < 0x10 ? "0" : "") + String((c), HEX))
+
+#if defined(ESP32)   // only on SD card
+File NMEALog;
+bool NMEALogOpen = false;
+#endif
 
 uint8_t NMEA_Source = DEST_NONE;   // identifies which port a sentence came from
 
@@ -423,6 +437,21 @@ void NMEA_setup()
         }
     }
   }
+
+  if (settings->log_nmea && SD_is_mounted) {
+        const char *filename = "/logs/NMEAlog.txt";
+        bool append = false;
+        if (SD.exists(filename)) {
+            const char *oldname = "/logs/NMEAold.txt";
+            SD.remove(oldname);
+            SD.rename(filename, oldname);
+        }
+        NMEALog = SD.open(filename, FILE_WRITE);
+        if (NMEALog)
+            NMEALogOpen = true;
+        else
+            Serial.println("Failed to open SD/logs/NMEAlog.txt for writing");
+  }
 #endif
 
 #if defined(USE_NMEA_CFG)
@@ -723,6 +752,14 @@ void NMEA_Outs(uint16_t nmeatype, const char *buf, unsigned int size, bool nl)
         NMEA_Out(settings->nmea_out,  buf, size, nl);
     if (out2)
         NMEA_Out(settings->nmea_out2, buf, size, nl);
+
+#if defined(ESP32)   // only on SD card
+    if (NMEALogOpen) {
+        NMEALog.write((const uint8_t *) buf, size);
+        if (nl)
+            NMEALog.print("\r\n");
+    }
+#endif
 }
 
 void NMEAOutC(int nmeatype)
@@ -1117,6 +1154,16 @@ void NMEA_loop()
 
 }
 
+#if defined(ESP32)
+void closeNMEAlog()
+{
+  if (NMEALogOpen) {
+      NMEALog.close();
+      NMEALogOpen = false;
+  }
+}
+#endif
+
 void NMEA_fini()
 {
 #if defined(NMEA_TCP_SERVICE)
@@ -1127,6 +1174,9 @@ void NMEA_fini()
         WiFi_disconnect_TCP();
   }
 #endif /* NMEA_TCP_SERVICE */
+#if defined(ESP32)
+  closeNMEAlog();
+#endif
 }
 
 void NMEA_Export()

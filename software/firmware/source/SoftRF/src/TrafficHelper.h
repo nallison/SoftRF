@@ -92,6 +92,7 @@ void icao_to_n(container_t *fop);
 int  traffic_cmp_by_distance(const void *, const void *);
 float Adj_alt_diff(container_t *, container_t *);
 void generate_random_id(void);
+void save_range_stats(void);
 
 void EmptyContainer(container_t *p);
 void EmptyFO(ufo_t *p);

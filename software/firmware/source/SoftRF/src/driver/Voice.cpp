@@ -258,9 +258,9 @@ void Voice_test(int reason)
 
 static void Traffic_Voice_Msg(container_t *fop, bool multi_alarm)
 {
-    int oclock = fop->RelativeBearing + 15;
-    if (oclock < 0)    oclock += 360;
-    if (oclock > 360)  oclock -= 360;
+    int oclock = fop->RelativeHeading + 15;
+    if (oclock < 0)     oclock += 360;
+    if (oclock >= 360)  oclock -= 360;
     oclock /= 30;
 
     const char *where;

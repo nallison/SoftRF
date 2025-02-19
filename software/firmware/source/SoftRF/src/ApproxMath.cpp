@@ -16,7 +16,8 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <math.h>
+//#include <math.h>
+#include <cmath>
 #include "../SoftRF.h"
 #include "ApproxMath.h"
 
@@ -30,10 +31,12 @@ static float atan_positive(float ns, float ew)
   float t;
   if (ew < ns) {
     t = ew / ns;
-    return (45.0*t + 15.5*(t*(1.0-t)));
+    //return (45.0*t + 15.86*(t*(1.0-t)));  // ops can be reduced
+    return t*((45.0+15.86) - 15.86*t);
   } else {
     t = ns / ew;
-    return (90.0 - 45.0*t - 15.5*(t*(1.0-t)));
+    //return (90.0 - 45.0*t - 15.86*(t*(1.0-t)));
+    return (90.0 - t*((45.0+15.86) - 15.86*t));
   }
 }
 
@@ -261,3 +264,67 @@ Serial.println(cos_lat);
 }
 
 float InvCosLat() { return inv_cos_lat; }
+
+// about +-0.01 absolute error:
+float log2_approx(float x) {
+    int exponent;
+    float f = std::frexp(x, &exponent);
+    return ((float)exponent + (4 - 1.3433152f * f) * f - 2.6587176f);
+}
+
+// https://innovation.ebayinc.com/tech/engineering/fast-approximate-logarithms-part-iii-the-formulas/
+// about +-0.001 absolute error:
+float log2_approx2(float x) {
+    int exponent;
+    float f = std::frexp(x, &exponent);
+    // range of f: 0.5 to 1.0
+    if (f < 0.75) {
+        --exponent;
+        f = f * 2.0;
+    }
+    // now range of f: 0.75 to 1.5 -- shift to -0.25 to +0.5:
+    f -= 1.0;
+    return ((float)exponent + ((0.388531f*f-0.741619f)*f+1.445866f)*f);
+}
+
+// helper function, 2^f where f is an integer
+static float exp2_int(float f) {
+    float x;
+    //if (f == 0)
+    //    return 1.0;
+    int n = (int) f;
+    if (n >= 0) {
+        if (n < 30)
+            return (float)(1<<n);
+        x = 2.0;
+    } else {  // n < 0
+        n = -n;
+        x = 0.5;
+    }
+    float y = 1.0;
+    while (n > 1) {
+        if (n & 1) {
+            y *= x;
+            n--;
+        }
+        x *= x;
+        n >>= 1;
+    }
+    return (x * y);
+}
+
+// relative error better than 0.6%
+float exp2_approx(float x) {
+    float f = floor(x);
+    x -= f;
+    float p = 1.0+x*(0.6958f+x*0.295f);
+    return (p * exp2_int(f));
+}
+
+// max relative error about 0.006%
+float exp2_approx2(float x) {
+    float f = floor(x);
+    x -= f;
+    float p = 1.0+x*(0.695792359f+x*(0.2251590619f+x*0.0790485792f));
+    return (p * exp2_int(f));
+}

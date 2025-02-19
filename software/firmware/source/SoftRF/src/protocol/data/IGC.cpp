@@ -852,10 +852,13 @@ bool writeIGCHeader()
     if (baro_chip != NULL) {
         strcpy(buf, "HFPRSPRESSALTSENSOR: Bosch,BME280,9163m\r\n");
         igc_file_append_commas(buf);
-    } else {
         igc_file_append_const("HFALPALTPRESSURE:ISA\r\n");
+//    } else {
+//        igc_file_append_const("HFALPALTPRESSURE:ISA\r\n");
+          // we output a copy of the GNSS ellipsoid altitude, no neither NIL nor ISA?
     }
-    igc_file_append_const("HFALGALTGPS:GEO\r\n");     // for non IGC loggers
+    //igc_file_append_const("HFALGALTGPS:GEO\r\n");   // for non IGC loggers that output geoid alt
+    igc_file_append_const("HFALGALTGPS:ELL\r\n");     // but we output the ellipsoid altitude
     igc_file_append_const("HFDTM100GPSDATUM: WGS-1984\r\n");
     igc_file_append_const("I00\r\n");   // >>> may add FXA etc later
     return true;  

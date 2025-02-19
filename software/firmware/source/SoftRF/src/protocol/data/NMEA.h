@@ -50,6 +50,7 @@
 
 void NMEA_setup(void);
 void NMEA_loop(void);
+void closeNMEAlog();
 void NMEA_fini();
 void NMEA_Export(void);
 void NMEA_Position(void);

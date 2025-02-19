@@ -42,7 +42,7 @@ void WiFi_fini()    {}
 String station_ssid = MY_ACCESSPOINT_SSID ;
 String station_psk  = MY_ACCESSPOINT_PSK ;
 
-String host_name = HOSTNAME;
+String host_name = HOSTNAME;   // "SoftRF"
 
 IPAddress local_IP(192,168,1,1);
 IPAddress gateway(192,168,1,1);
@@ -411,7 +411,7 @@ void WiFi_loop()
   if ((settings->power_save & POWER_SAVE_WIFI) && WiFi.getMode() == WIFI_AP) {
     if (SoC->WiFi_clients_count() == 0) {
       if ((millis() - WiFi_No_Clients_Time_ms) > POWER_SAVING_WIFI_TIMEOUT) {
-        NMEA_fini();
+        //NMEA_fini();   // keep serial & BT NMEA going
         Web_fini();
         WiFi_fini();
 

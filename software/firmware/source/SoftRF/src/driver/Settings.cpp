@@ -170,6 +170,7 @@ static void init_stgdesc()
   stgdesc[STG_POWER_EXT]  = { "power_ext",  (char*)&settings->power_ext,  STG_UINT1 };
   stgdesc[STG_RFC]        = { "rfc",        (char*)&settings->freq_corr,  STG_HIDDEN };
   stgdesc[STG_ALARMLOG]   = { "alarmlog",   (char*)&settings->logalarms,  STG_UINT1 };
+  stgdesc[STG_LOG_NMEA]   = { "log_nmea",   (char*)&settings->log_nmea,   esp_only(STG_UINT1) };
   stgdesc[STG_GNSS_PINS]  = { "gnss_pins",  (char*)&settings->gnss_pins,  esp_only(STG_UINT1) };
   stgdesc[STG_PPSWIRE]    = { "ppswire",    (char*)&settings->ppswire,    esp_only(STG_UINT1) };
   stgdesc[STG_SD_CARD]    = { "sd_card",    (char*)&settings->sd_card,    esp_only(STG_UINT1) };
@@ -254,6 +255,7 @@ static void init_stgdesc()
   stgcomment[STG_RFC]        = "freq correction +-30";
   stgcomment[STG_LEAPSECS]   = "leap seconds - automatic";
   stgcomment[STG_ALARMLOG]   = yesno;
+  stgcomment[STG_LOG_NMEA]   = "1 = log all NMEA output to SD card";
   stgcomment[STG_LOGFLIGHT]  = "0=off 1=always 2=airborne 3=traffic";
   stgcomment[STG_LOGINTERVAL]= "seconds, 1-255";
 #if defined(ESP32)
@@ -790,6 +792,7 @@ void Settings_defaults(bool keepsome)
 #endif
 
     settings->logalarms  = false;
+    settings->log_nmea   = false;
   }
   // otherwise keep those settings from the previous version
 

@@ -214,6 +214,7 @@ enum stgidx {
     STG_RFC,
     STG_ALARMLOG,
 //#if defined(ESP32)
+    STG_LOG_NMEA,
     STG_GNSS_PINS,
     STG_PPSWIRE,
     STG_SD_CARD,
@@ -412,6 +413,7 @@ typedef struct Settings {
     uint8_t  sd_card;      // gpio pins for SD card adapter
     bool     invert2;     // whether to invert the logic levels on UART2
     bool     altpin0;     // whether to use a different pin for UART0 RX
+    bool     log_nmea;
 //#endif
     uint8_t  logflight;
     uint8_t  loginterval;

@@ -81,7 +81,7 @@ cbuf *BLE_FIFO_RX, *BLE_FIFO_TX;
 BluetoothSerial SerialBT;
 #endif /* CONFIG_IDF_TARGET_ESP32S3 */
 
-String BT_name = HOSTNAME;
+String BT_name;
 
 static unsigned long BLE_Notify_TimeMarker = 0;
 static unsigned long BLE_Advertising_TimeMarker = 0;
@@ -115,8 +115,13 @@ class UARTCallbacks: public BLECharacteristicCallbacks {
 
 static void ESP32_Bluetooth_setup()
 {
-  //BT_name += "-";
-  BT_name += String(SoC->getChipId() & 0x00FFFFFFU, HEX);
+  if (settings->myssid[0] != '\0') {
+      BT_name = settings->myssid;
+  } else {
+      BT_name = HOSTNAME;    // "SoftRF"
+      //BT_name += "-";
+      BT_name += String(SoC->getChipId() & 0x00FFFFFFU, HEX);
+  }
 
   switch(settings->bluetooth)
   {
@@ -1429,8 +1434,13 @@ void nRF52_Bluetooth_setup()
 
   BTactive = true;
 
-  //BT_name += "-";
-  BT_name += String(SoC->getChipId() & 0x00FFFFFFU, HEX);
+  if (settings->myssid[0] != '\0') {
+      BT_name = settings->myssid;
+  } else {
+      BT_name = HOSTNAME;    // "SoftRF"
+      //BT_name += "-";
+      BT_name += String(SoC->getChipId() & 0x00FFFFFFU, HEX);
+  }
 
   // Setup the BLE LED to be enabled on CONNECT
   // Note: This is actually the default behavior, but provided

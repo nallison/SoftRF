@@ -9,10 +9,11 @@ DIY, multifunctional, compatible, sub-1 GHz ISM band radio based proximity aware
 
 ### Latest additions:
 
-* vMB153: improved UI, compressed flight logs
-* vMB152: settings stored in a text file
+* vMB155: collect statistics on reception range by relative direction 
+* vMB153: record compressed flight logs in flash memory (T-Beam & T-Echo)
+* vMB152: settings stored in an editable text file
 * vMB149: handles Mode-S in addition to ADS-B
-* vMB140: supports SD card & flight logging, on the T-Beam
+* vMB140: supports adding an SD card and writing flight logs on the T-Beam
 * vMB138: supports using add-on GNSS modules, on the T-Beam
 * vMB130: supports the GNS5892R ADS-B receiver module, on the T-Beam
 * vMB120: supports the latest 2024 radio protocol

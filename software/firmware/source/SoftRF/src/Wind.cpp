@@ -565,6 +565,7 @@ void this_airborne()
     } else if (ThisAircraft.airborne==1 && airborne<=0) {
       airborne_changed = true;
       AirborneTime = 0;
+      save_range_stats();
 #if defined(ESP32)
       if (settings->rx1090)
           save_zone_stats();  // do this first as it will append comments to IGC file
