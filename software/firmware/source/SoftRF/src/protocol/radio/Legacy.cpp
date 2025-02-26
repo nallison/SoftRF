@@ -279,7 +279,7 @@ bool latest_decode(void* buffer, container_t* this_aircraft, ufo_t* fop)
 
     latest_packet_t* pkt = (latest_packet_t *) buffer;
 
-#if 1
+#if 0
     if (settings->nmea_d || settings->nmea2_d) {
       if (settings->debug_flags & DEBUG_LEGACY) {
         if (settings->debug_flags & DEBUG_DEEPER) {

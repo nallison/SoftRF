@@ -4,7 +4,7 @@ Preliminary Documentation for Moshe Braner's version of SoftRF
 
 By Moshe Braner
 
-This version last updated February 18, 2025 to fit software version MB155
+This version last updated February 26, 2025 to fit software version MB156
 Get the latest version here:
   https://github.com/moshe-braner/SoftRF/blob/master/software/firmware/documentation
 or direct link:
@@ -49,6 +49,8 @@ nmea_e & nmea2_e - 1 for "tunnel" from connected devices, 2 for generated (strob
 nmea_d & nmea2_d - now a 24-bit bitfield, see values in Settings.h
 nmea_p & nmea2_p - debug output from original SoftRF, my version added nmea_d
 
+baud_rate - baud rate code (1=4800 2=9600 3=19200 4=38400 5=57600 6=115200) for the main serial/USB port.  The code "0" means the default baud rate, which is 38400.
+
 gdl90 - GDL90 output: this is for a different local data transfer protocol, usually leave Off (0).  If used, should not choose the same destination (e.g., UDP) as an NMEA output destination.
 
 d1090 - Dump1090: yet another local data output protocol, usually leave Off (0).
@@ -72,7 +74,7 @@ On the T-Beam only:
 
 altpin0 - Serial Port input pin: the default is the "RX" pin on the T-Beam, which is connected to the USB interface and thus not available for input from a TTL serial device.  You can choose to use the "VP" pin instead, dis-associating serial input from the USB port.  Or use the secondary serial port instead.
 
-baudrate2 - baud rate code (0=off 2=9600 3=19200 4=38400) for the secondary serial port (pins 39 ("VN") & 4)
+baudrate2 - baud rate code (0=off 2=9600 3=19200 4=38400 etc) for the secondary serial port (pins 39 ("VN") & 4)
 
 invert2 - Aux/Secondary Serial Port Logic: "Normal" to connect to TTL serial devices or a chip that converts to RS232. "Inverted" to connect to RS232 devices without a conversion chip (output voltage may not suffice - see section on connecting devices in the user guide).
 
@@ -422,6 +424,16 @@ Revision of the data structures
 
 Implemented a revision of the data structures at the heart of SoftRF: the "container[]" array.  Each element in it has grown to hundreds of bytes, and was copied over and over for each incoming packet.  Changed to two structure types.  A short one (ufo_t) for data from incoming packets, with only the needed fields (57 bytes).  And a long one (container_t) for the array.  There is a third small one (adsfo_t) with only the fields needed for processing incoming ADS-B messages.
 
+GNSS baud rate and bridge mode
+
+The internal connection between the processor and the GNSS module uses a baud rate (normally 9600) that is independent of the baud rate selected for the external serial connection to the main (USB) serial port.  If the GNSS module is not reachable at 9600 then it may have been configured (perhaps by other firmware that was previously installed) to some other baud rate.  It may also have been configured to only communicate with the UBX binary protocol and not NMEA.
+
+From version MB156, SoftRF will try and detect GNSS NMEA sentences at other baud rates.  Also, at each baud rate it also tries a UBX query, in case NMEA is not being output.  If either succeeds, will use that baud rate (for the internal connection to the GNSS).  If only UBX is used, it will reset the module to factory defaults.
+
+If you click the "reset GNSS" button in the web interface then the GNSS module will return to the factory default baud rate, usually 9600, except perhaps for some Ublox Neo-8 modules which default to 115200.  After clicking this button, SoftRF also reboots, thus the baud rate detection will happen.
+
+If SoftRF fails to connect to the GNSS despite the automatic baud rate selection, you can use "GNSS bridge mode" and the U-Center Windows app (from Ublox) to diagnose and repair the GNSS module's configuration.  From version MB156, when in GNSS bridge mode, the internal connection to the GNSS module uses the same baud rate selected for the external serial connection to the main (USB) serial port.  (In bridge mode it does not try and automatically adjust to the baud rate of the GNSS module.)  If you need to use the GNSS bridge mode, then also (within the SoftRF settings) change the main (USB) serial port baud rate to the same baud rate that the GNSS module is using.  That is normally 9600.  If the GNSS is not reachable at 9600, try other baud rates (19200, 38400, 57600 or 115200) until U-Center reports a connection.  (For each baud rate need to change the setting in U-Center and also change the setting in SoftRF and reboot.)  After using U-Center to restore the factory default settings, the GNSS module should be back to its default baud rate, usually 9600, except perhaps for some Ublox Neo-8 modules which default to 115200.  So change U-Center to that baud rate, and then change SoftRF to that baud rate (and reboot) for a final test in bridge mode, and then change SoftRF to normal mode and the default (38400) baud rate.
+
 Reception range analysis
 
 From version MB155, SoftRF collects summary data about the distance and reception RSSI of aircraft that either just entered or just left reception range.  The data is stored in a file "range.txt" in the flash file system (SPIFFS on the T-Beam, FATFS on the T-Echo.)  This file is plain text with the following structure (14 lines total):
@@ -429,7 +441,7 @@ From version MB155, SoftRF collects summary data about the distance and receptio
         9.4,3.226,1234  # range (km), log2(range), number of samples - for "oclock=0" (straight ahead)
         ...             # similarly for each "oclock" 1 through 11
         -91.4,2.58      # average RSSI, mean square deviation
-The file is read, new data collected during the flight, and a new version of the file is written after landing.  If a flight log is being recorded, the range statistics are also written as "LPLTAN,..." comment lines in the IGC file.  Samples are only taken if airborne, of other aircraft that are airborne, and at least 1km away and not at too high or low a vertical angle.  ADS-B traffic is not sampled.  The range averaging is done on a log scale, but the range numbers appear as the first item in each line in the file.  If, after enough data has been collected, the range is much lower in some directions than others, the antenna placement may not be ideal.  If the RSSI average is much higher (less negative) than -100, there is radio noise in the cockpit making SoftRF reception less sensitive.  E.g., a USB power converter may generate such noise.  If the RSSI mean square deviation is large, such noise may be intermittent, perhaps caused by a device that is only sometimes carried along or turned on.  To start over collecting range data, delete the file range.txt.
+The file is read, new data appended during the flight, and a new version of the file is written after landing.  If a flight log is being recorded, the range statistics are also written as "LPLTAN,..." comment lines in the IGC file.  Samples are only taken if airborne, of other aircraft that are airborne, and at least 1km away and not at too high or low a vertical angle.  ADS-B traffic is not sampled.  The range averaging is done on a log scale, but the range numbers as plain km appear as the first item in each line in the file.  If, after enough data has been collected, the range is much lower in some directions than others, the antenna placement may not be ideal.  If the RSSI average is much higher (less negative) than -100, there is radio noise in the cockpit making SoftRF reception less sensitive.  E.g., a USB power converter may generate such noise.  If the RSSI mean square deviation is large, such noise may be intermittent, perhaps caused by a device that is only sometimes carried along or turned on.  To forget the old data and start over collecting new range data, delete the file range.txt.
 
 
 KNOWN ISSUES

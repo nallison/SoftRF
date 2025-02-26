@@ -2069,7 +2069,7 @@ void NMEA_Process_SRF_SKV_Sentences()
                 loaded = load_setting(i, S_value.value());
         }
 
-        if (!query && !loaded) {
+        if (!query && cfg_is_updated && !loaded) {
           snprintf_P(NMEABuffer, sizeof(NMEABuffer),
                   PSTR("%s,%s - error\r\n"), S_label.value(), S_value.value());
           nmea_cfg_reply();

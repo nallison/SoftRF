@@ -1248,7 +1248,7 @@ void handleRoot() {
   char str_vbat[8];
   char str_vusb[8];
 
-  size_t size = 4500;
+  size_t size = 4900;
   char *Root_temp = (char *) malloc(size);
   if (Root_temp == NULL) {
       Serial.println(F(">>> not enough RAM"));
@@ -1436,7 +1436,7 @@ void handleRoot() {
   );
   Serial.print(F("Status page size: ")); Serial.print(strlen(Root_temp));
   Serial.print(F(" out of allocated: ")); Serial.println(size);
-  // currently about _____
+  // currently about 3950
   serve_html(Root_temp);
   free(Root_temp);
   yield();
@@ -1663,12 +1663,12 @@ bool trash_file(const char *filename)
   filepath += &filename[6];
   if (SD.exists(filepath)) {
       String oldpath = "/logs/old/";
-      filepath += &filename[6];
+      oldpath += &filename[6];
       if (SD.exists(oldpath))
           SD.remove(oldpath);
       SD.rename(filepath,oldpath);
       char buf[148];
-      snprintf_P ( buf, 148, PSTR("<h3>SD%s moved to /old/</h3>%s"), filepath, home);
+      snprintf_P ( buf, 148, PSTR("<h3>SD%s moved to /old/</h3>%s"), filepath.c_str(), home);
       server.send(200, texthtml, buf);
       return true;
   }
@@ -2155,12 +2155,13 @@ void doEmptyTrash()
     File file = root.openNextFile();
     String file_name;
     while(file) {
-        file_name = file.name();
+        file_name = "/logs/old/";
+        file_name += file.name();
         file = root.openNextFile();
         if (file_name.endsWith(".IGC") || file_name.endsWith(".igc")) {
-            SD.remove(file_name);
             Serial.print("...");
-            Serial.println(file_name);
+            Serial.println(file_name.c_str());
+            SD.remove(file_name.c_str());
             ++nfiles;
         }
         yield();

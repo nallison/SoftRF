@@ -960,8 +960,8 @@ void save_settings_to_file()
       Serial.println(F("Failed to open settings.txt"));
       return;
   }
-  snprintf(NMEABuffer,sizeof(NMEABuffer),"# originator: model %d ID %06X\r\n",
-                               hw_info.model, SoC->getChipId());
+  snprintf(NMEABuffer,sizeof(NMEABuffer),"# originator: model %d fw %s ID %06X\r\n",
+               hw_info.model, SOFTRF_FIRMWARE_VERSION, SoC->getChipId());
   Serial.print(NMEABuffer);
   SettingsFile.write((const uint8_t *)NMEABuffer, strlen(NMEABuffer));
   settings->version = SOFTRF_SETTINGS_VERSION;

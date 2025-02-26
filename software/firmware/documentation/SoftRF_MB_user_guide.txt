@@ -3,7 +3,7 @@ Basic Documentation for Moshe Braner's version of SoftRF
 
 By Moshe Braner
 
-This version last updated February 13, 2025 to fit software version MB155
+This version last updated February 23, 2025 to fit software version MB155
 The latest version of this document is always here:
   https://github.com/moshe-braner/SoftRF/blob/master/software/firmware/documentation
 or direct link:
@@ -204,7 +204,7 @@ Description of the basic settings:
 
 (See the "under the hood" document for details of the advanced settings.)
 
-Mode: normally select "Normal".  GNSS Bridge mode lets one communicate with the GNSS module directly from the USB port, for diagnostics (e.g., using the Ublox U-Center program).  On the T-Echo, can enter this mode via NMEA config, escape this mode with a double-click.  On the T-Beam can exit this mode (or any mode other than "Normal" and "More NMEA") via clicking the middle button, switching to Normal mode.  (Long-press the first button on T-Beam v0.7.)
+Mode: normally select "Normal".  GNSS Bridge mode lets one communicate with the GNSS module directly from the USB port, for diagnostics (e.g., using the Ublox U-Center program).  In this mode, the baud rate chosen for the external connection to USB is also used for the internal one to the GNSS.  On the T-Echo, can enter this mode via NMEA config, escape this mode with a double-click.  On the T-Beam can exit this mode (or any mode other than "Normal") via clicking the middle button, switching to Normal mode.  (Long-press the first button on T-Beam v0.7.)
 
 Device ID: this is unique to each device and you cannot change it.  The first hex digit is now always set to "8", to avoid possible duplication of a FLARM device ID.  If your device ID (rather than ICAO ID) is registered with OGN, you will need to edit that registration.
 
@@ -427,7 +427,7 @@ But, these pins operate at TTL voltage levels (0v and about +3V).  Many external
 
 Once connected, be sure to set the baud rate on the external device to match what SoftRF is using (38400 baud by default), or vice versa (my version of SoftRF allows you to choose the baud rate).  Note that when the T-Beam starts up, it send some data at 115,200 baud, and then switches to the chosen baud rate.  Devices that detect the baud rate automatically (e.g., the Sotecc canopy flasher) may get confused by that, so set the device to use a specific baud rate without auto-detection.
 
-If desired, a barometric sensor of the BMP280 type can be connected to the T-Beam via an I2C connection.  Use pins 21 (SDA) and 22 (SCL).  Or  can connect the barometric sensor to pins 13 (SDA) and 2 (SCL).  (But be sure to connect pin 2 in a way that is easy to disconnect - see section on USB flashing.)  Can use the same pins as the OLED display, they can share them.  (The AXP PMU too is using pins 21,22.)  Data from the barometric sensor will be sent out as NMEA sentences if the "sensors" NMEA output is turned on in the setttings.
+If desired, a barometric sensor of the BMP280 type can be connected to the T-Beam via an I2C connection.  Use pins 21 (SDA) and 22 (SCL).  Or  can connect the barometric sensor to pins 13 (SDA) and 2 (SCL).  (But be sure to connect pin 2 in a way that is easy to disconnect - see the section "Installing firmware for the first time".)  Can use the same pins as the OLED display, they can share them.  (The AXP PMU too is using pins 21,22.)  Data from the barometric sensor will be sent out as NMEA sentences if the "sensors" NMEA output is turned on in the setttings.
 
 An alternative to the built-in GNSS is to add an external one.  That may give better performance, or replace an ailing on-board GNSS module.  It needs to be a module with a TTL-level serial interface.  Ideally it should have a PPS output wire, and be compatible with the Ublox configuration commands.  For example, modules based on the 
 UBX-G7020-KT chip are available, labeled VK2828U7 and similar, such as:

@@ -999,7 +999,6 @@ static bool load_range_stats()
     }
     File statsfile = FILESYS.open("/range.txt", FILE_READ);
     if (! statsfile)
-
         return false;
     char buf[64];
     if (! getline(statsfile, buf, 64)) {
@@ -1074,7 +1073,7 @@ void sample_range(container_t *fop)
 // this is called after landing
 void save_range_stats()
 {
-    if (newrssi_n == 0)
+    if (newrssi_n == 0)  // no new data
         return;
     FILESYS.remove("/oldrange.txt");
     FILESYS.rename("/range.txt", "/oldrange.txt");
@@ -1087,7 +1086,7 @@ void save_range_stats()
         if (newrange_n[oclock]) {
             newrange[oclock] += oldrange[oclock] * oldrange_n[oclock];
             newrange_n[oclock] += oldrange_n[oclock];
-            newrange[oclock] /= newrange_n[oclock];     // new mean
+            newrange[oclock] /= (float) newrange_n[oclock];     // new mean
         } else {   // no new samples in this oclock
             newrange[oclock] = oldrange[oclock];
             newrange_n[oclock] = oldrange_n[oclock];
@@ -1101,14 +1100,17 @@ void save_range_stats()
         FlightLogComment(buf);      // - it will prepend LPLT, resulting in, e.g., LPLTAN,...
     }
     newrssi_sum += oldrssi_mean * (float) oldrssi_n;   // total new sum
-    newrssi_n   += oldrssi_n;            // total count
-    newrssi_sum /= (float) newrssi_n;    // new mean
+    newrssi_n   += oldrssi_n;                // total count
+    //if (newrssi_n)
+        newrssi_sum /= (float) newrssi_n;    // new mean
     float devsquared = (newrssi_dev * newrssi_dev);
     // - newrssi_sum is the *total* (new & old data) deviations from the old mean
     oldrssi_ssd *= (float) oldrssi_n;    // old summed square deviations from mean
     newrssi_ssd += oldrssi_ssd;          // total squared deviations from old mean
-    newrssi_ssd -= devsquared / (float) newrssi_n;   // new variance
-    newrssi_ssd /= (float) newrssi_n;                // new mean_square_deviation
+    //if (newrssi_n) {
+        newrssi_ssd -= devsquared / (float) newrssi_n;   // new variance
+        newrssi_ssd /= (float) newrssi_n;                // new mean_square_deviation
+    //}
     snprintf(buf, 64, "AN,%f,%f", newrssi_sum, newrssi_ssd);
     Serial.println(buf+3);
     statsfile.println(buf+3);   // skip the "AN,"

@@ -283,6 +283,10 @@ const uint8_t setSBAS[] PROGMEM = {0x01, 0x03, 0x03, 0x00, 0x00, 0x00, 0x00, 0x0
 uint8_t setBR[] = {0x01, 0x00, 0x00, 0x00, 0xD0, 0x08, 0x00, 0x00, 0x00, 0x96,
                    0x00, 0x00, 0x07, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00};
 
+//const setBR9600[] = 
+//B5 62 06 00 14 00 01 00 00 00 10 00 00 00 80 25 00 00 03 00 02 00 00 00 00 00 D5 17
+//B5 62 06 09 0D 00 58 2D 77 05 03 00 00 00 68 2D 77 05 07 38 E9
+
 const uint8_t setNav5[] PROGMEM = {0xFF, 0xFF, 0x07, 0x03, 0x00, 0x00, 0x00, 0x00,
                                    0x10, 0x27, 0x00, 0x00, 0x05, 0x00, 0xFA, 0x00,
                                    0xFA, 0x00, 0x64, 0x00, 0x2C, 0x01, 0x00, 0x00,
@@ -324,15 +328,18 @@ const uint8_t RXM_PMREQ_OFF[16] PROGMEM = {0xb5, 0x62, 0x02, 0x41, 0x08, 0x00,
 //const uint8_t cfg_clear2[] PROGMEM = {0xB5, 0x62, 0x06, 0x09, 0x0D, 0x00, 0xFF, 0xFF, 0x00, 0x00,
 //                                  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x1C, 0xA2};
 const uint8_t cfg_clear2[] PROGMEM =
- { 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02 };
+  { 0xFF, 0xFB, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02 };
+//{ 0xFF, 0xFF, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02 };
 //const uint8_t cfg_clear4[] PROGMEM = {0xB5, 0x62, 0x06, 0x09, 0x0D, 0x00, 0xFF, 0xFF, 0x00, 0x00,
 //                                  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x1B, 0xA1};
 const uint8_t cfg_clear4[] PROGMEM =
- { 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04 };
+  { 0xFF, 0xFB, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04 };
+//{ 0xFF, 0xFF, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04 };
 //const uint8_t cfg_clear1[] PROGMEM = {0xB5, 0x62, 0x06, 0x09, 0x0D, 0x00, 0xFF, 0xFF, 0x00, 0x00,
 //                                  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x1B, 0xA1};
 const uint8_t cfg_clear1[] PROGMEM =
- { 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01 };
+  { 0xFF, 0xFB, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01 };
+//{ 0xFF, 0xFF, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01 };
 //const uint8_t cfg_load3[]  PROGMEM = {0xB5, 0x62, 0x06, 0x09, 0x0D, 0x00, 0x00, 0x00, 0x00, 0x00,
 //                                  0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x07, 0x21, 0xB7};
 const uint8_t cfg_load3[]  PROGMEM =
@@ -982,14 +989,21 @@ static bool ublox_factory_reset(bool coldstart)
   if (getUBX_ACK(0x06, 0x09)) {
       Serial.println("cleared BBR config");
   } else return false;
+
+/*
+ * Do NOT "load" the new (factory default) settings since the baud rate will change and thus there
+ * would be no ACK received.  Instead, just do the restart, that will load the new settings.
+ *
 //  Serial_GNSS_In.write(cfg_load3, sizeof(cfg_load3));    // load config from all 3 devices (but not SPI)
   msglen = makeUBXCFG(0x06, 0x09, sizeof(cfg_load3), cfg_load3);
   sendUBX(GNSSbuf, msglen);
   if (getUBX_ACK(0x06, 0x09)) {
       Serial.println("UBX config reloaded");
   } else return false;
-
   delay(600);
+*/
+
+  delay(100);
 
   if (coldstart) {
     // Cold Start (Forced Watchdog)
@@ -1505,6 +1519,43 @@ TinyGPSCustom P_course;
 TinyGPSCustom P_vs;
 TinyGPSCustom P_turnrate;
 
+// call this to try other baud rates if the default 9600 failed to receive NMEA
+static gnss_id_t probe_baud_rates()
+{
+    if (settings->mode == SOFTRF_MODE_GPSBRIDGE)  // do not change baud rate
+        return generic_nmea_probe();              // just try one more time at same rate
+    gnss_id_t rval = GNSS_MODULE_NONE;
+    for (int i=BAUD_115200; i>=BAUD_9600; i--) {
+        unsigned long baudrate = baudrates[i];
+        Serial_GNSS_In.updateBaudRate(baudrate);
+        Serial.print(F("Trying baud rate... "));
+        Serial.println(baudrate);
+        delay(500);
+        rval = generic_nmea_probe();
+        if (rval == GNSS_MODULE_NMEA) {
+            Serial.println(F("... got NMEA!"));
+            break;
+        }
+#if !defined(EXCLUDE_GNSS_UBLOX) && defined(ENABLE_UBLOX_RFS)
+        if (hw_info.model == SOFTRF_MODEL_PRIME_MK2 ||
+            hw_info.model == SOFTRF_MODEL_PRIME_MK3) {
+            // no NMEA, try UBX
+            byte version = ublox_version();
+            if (version == GNSS_MODULE_U6 ||
+                version == GNSS_MODULE_U7 ||
+                version == GNSS_MODULE_U8) {
+                    Serial.println(F("... got UBX!"));
+                    // rval still == GNSS_MODULE_NONE
+                    // but baud rate is now correct
+                    // and later code will find the UBX
+                    break;
+            }
+        }
+#endif
+    }
+    return rval;
+}
+
 byte GNSS_setup() {
 
   if (hw_info.model == SOFTRF_MODEL_PRIME_MK2 /* && hw_info.revision >= 8 */)
@@ -1520,7 +1571,10 @@ byte GNSS_setup() {
   if ((! is_prime_mk2) || (settings->debug_flags & DEBUG_SIMULATE) == 0
       || (settings->gnss_pins != EXT_GNSS_NONE)) {
 #endif
-      SoC->swSer_begin(SERIAL_IN_BR);
+      unsigned long baudrate = SERIAL_IN_BR;
+      if (settings->mode == SOFTRF_MODE_GPSBRIDGE)
+          baudrate = baudrates[settings->baud_rate];  // a way to reach a misconfigured GNSS module
+      SoC->swSer_begin(baudrate);
       delay(500);  // added to make sure swSer is ready
   }
 
@@ -1560,13 +1614,14 @@ byte GNSS_setup() {
 
   if (gnss_id == GNSS_MODULE_NONE) {               // not Sony, listen for $G sentences
       gnss_id = generic_nmea_ops.probe();
-      if (gnss_id == GNSS_MODULE_NONE) {           // no NMEA sentences seen, try again
+      if (gnss_id == GNSS_MODULE_NONE) {           // no NMEA sentences seen
+          Serial.println(F("No GNSS NMEA at 9600 baud"));
           delay(500);
-          gnss_id = generic_nmea_ops.probe();
+          gnss_id = probe_baud_rates();       // try other baud rates, ending with 9600 
       }
   }
 
-  if (gnss_id == GNSS_MODULE_NONE) {               // no NMEA sentences seen in 2 trials (6 sec)
+  if (gnss_id == GNSS_MODULE_NONE) {               // no NMEA sentences seen at any baud rate
 
 #if !defined(EXCLUDE_GNSS_UBLOX) && defined(ENABLE_UBLOX_RFS)
     if (hw_info.model == SOFTRF_MODEL_PRIME_MK2 ||
@@ -1576,7 +1631,7 @@ byte GNSS_setup() {
 
       if (version == GNSS_MODULE_U6 ||
           version == GNSS_MODULE_U7 ||
-          version == GNSS_MODULE_U8) {
+          version == GNSS_MODULE_U8) {   // UBX connection at 9600 baud did work
 
         gnss_chip = &ublox_ops;
 
@@ -1585,27 +1640,32 @@ byte GNSS_setup() {
         if (gnss_id == GNSS_MODULE_NMEA) {
 
             gnss_id = (gnss_id_t) version;     // got NMEA on the third time
-            Serial.println(F("... OK after ublox_version()"));   // and fall through to probe() call below
+            Serial.println(F("... OK after ublox_version()"));
+            // and fall through to probe() call below
 
         } else {
 
           Serial.print(F("Reset UBLOX GNSS to factory default config: "));
 
-          //(void) ublox_factory_reset(true);    // reset config, and do a coldstart
-          (void) ublox_factory_reset(false);   // reset config, but do a warmstart
+          //(void) ublox_factory_reset(true);
+          (void) ublox_factory_reset(false);    // reset config, but do a warmstart
 
-          gnss_id = generic_nmea_ops.probe();   // try one more time
+          gnss_id = generic_nmea_ops.probe();    // try again listening for NMEA
+          if (gnss_id == GNSS_MODULE_NONE)
+              gnss_id = probe_baud_rates();
 
           if (gnss_id == GNSS_MODULE_NONE) {
             Serial.println(F("FAILURE"));
             return (byte) gnss_id;
           }
-          Serial.println(F("SUCCESS"));    // and fall through to probe() call below
+
+          gnss_id = (gnss_id_t) version;     // we know it is a UBLOX
+          Serial.println(F("SUCCESS"));      // and fall through to probe() call below
         }
 
       } else {
-        Serial.println(F("WARNING: no NMEA and Ublox GNSS not detected!"));
-        return (byte) gnss_id;    // GNSS_MODULE_NONE
+          Serial.println(F("WARNING: no NMEA and Ublox GNSS not detected (at any baud rate)"));
+          return (byte) gnss_id;    // GNSS_MODULE_NONE
       }
 
     } else   // not SOFTRF_MODEL_PRIME_MK*
