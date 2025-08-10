@@ -32,7 +32,7 @@
 #define NAVBOX1_TITLE           "SAT"
 #define NAVBOX2_TITLE           "BAT"
 #define NAVBOX3_TITLE           "ACFTS"
-#define NAVBOX4_TITLE           "ALARM"
+#define NAVBOX4_TITLE           "RSSI"  /* Neil's RSSI display, was ALARM */
 #define NAVBOX5_TITLE           "RX"
 #define NAVBOX6_TITLE           "TX"
 
